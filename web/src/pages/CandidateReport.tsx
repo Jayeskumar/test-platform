@@ -1,5 +1,6 @@
-import { ArrowLeft, BrainCircuit, CheckCircle2, ClipboardPaste, Eye, EyeOff, Maximize, Minimize2, Send, XCircle } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { ArrowLeft, Ban, BrainCircuit, CameraOff, CheckCircle2, ClipboardPaste, Copy, Eye, EyeOff, Laptop, Maximize, Minimize2, MonitorSmartphone, Send, UserX, Users, XCircle } from 'lucide-react';
+import { AccessPanel, type AccessRow, type MediaItem, ProctoringPanel, type SharedWith } from '../components/proctor/ReportPanels';
+import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ComplexityCard, ScoreRing } from '../components/charts';
 import { CodeEditor } from '../components/CodeEditor';
@@ -13,18 +14,23 @@ import type { Submission } from '../lib/types';
 import { INTEGRITY_CLS } from './AssessmentDetail';
 
 interface QReport {
-  id: number; title: string; type: 'coding' | 'sql' | 'mcq'; difficulty: 'easy' | 'medium' | 'hard'; points: number; statement: string; score: number; views: number;
+  id: number; title: string; type: 'coding' | 'sql' | 'mcq'; difficulty: 'easy' | 'medium' | 'hard'; points: number; statement: string; score: number; views: number; pool?: string | null;
   options?: { id: string; text: string }[]; correct?: string[]; choice?: string | string[] | null; isCorrect?: boolean;
   language?: string | null; code?: string | null; best?: Submission | null;
   submissions?: { id: number; kind: string; verdict: any; score: number; passed: number; total: number; language: string; createdAt: number; timeMs: number }[];
   snapshots?: Snapshot[];
 }
 interface Report {
-  attempt: { id: number; name: string; email: string; status: string; startedAt: number; submittedAt: number | null; deadlineAt: number; score: number; maxScore: number; durationMs: number | null; percentile: number | null };
-  assessment: { id: number; title: string; durationMin: number };
+  attempt: { id: number; name: string; email: string; status: string; startedAt: number; submittedAt: number | null; deadlineAt: number; score: number; maxScore: number; durationMs: number | null; percentile: number | null; deviceLocked: boolean };
+  assessment: { id: number; title: string; durationMin: number; proctoring: { webcam: boolean; identityCheck: boolean; singleDevice: boolean }; retentionDays: number; usesPools: boolean };
+  media: MediaItem[];
+  access: AccessRow[];
   questions: QReport[];
   events: { id: number; question_id: number | null; type: string; detail: any; t: number }[];
-  integrity: { score: number; level: string; counts: Record<string, number>; largePastes: number; pastedChars: number; burstEdits: number; flags: string[] } | null;
+  integrity: {
+    score: number; level: string; counts: Record<string, number>; largePastes: number; pastedChars: number; burstEdits: number; flags: string[];
+    access: { devices: number; networks: number; sharedWith: SharedWith[] };
+  } | null;
   ai: { enabled: boolean; review: any };
 }
 
@@ -35,6 +41,15 @@ const EVENT_STYLE: Record<string, { icon: any; cls: string; label: string }> = {
   fullscreen_exit: { icon: Minimize2, cls: 'bg-orange-400', label: 'Exited fullscreen' },
   fullscreen_enter: { icon: Maximize, cls: 'bg-ink-500', label: 'Entered fullscreen' },
   submitted: { icon: Send, cls: 'bg-emerald-400', label: 'Submitted' },
+  no_face: { icon: UserX, cls: 'bg-rose-500', label: 'Not on camera' },
+  multiple_faces: { icon: Users, cls: 'bg-red-600', label: 'More than one person' },
+  camera_lost: { icon: CameraOff, cls: 'bg-rose-400', label: 'Camera disconnected' },
+  paste_blocked: { icon: Ban, cls: 'bg-fuchsia-400', label: 'Blocked paste' },
+  copy_blocked: { icon: Copy, cls: 'bg-fuchsia-300', label: 'Blocked copy' },
+  multi_monitor: { icon: MonitorSmartphone, cls: 'bg-orange-300', label: 'Second display' },
+  duplicate_tab: { icon: Copy, cls: 'bg-orange-500', label: 'Second tab' },
+  device_change: { icon: Laptop, cls: 'bg-red-400', label: 'Switched device' },
+  device_blocked: { icon: Laptop, cls: 'bg-red-300', label: 'Other device refused' },
 };
 
 function Timeline({ r }: { r: Report }) {
@@ -52,7 +67,7 @@ function Timeline({ r }: { r: Report }) {
       </div>
       <div className="flex justify-between text-[11px] text-ink-500"><span>start</span><span>{duration(span)}</span></div>
       <div className="mt-2 flex flex-wrap gap-3 text-[11px] text-ink-400">
-        {['tab_hidden', 'paste', 'fullscreen_exit', 'submitted'].map((k) => <span key={k} className="flex items-center gap-1"><span className={cx('size-2 rounded-full', EVENT_STYLE[k].cls)} />{EVENT_STYLE[k].label}</span>)}
+        {Object.keys(EVENT_STYLE).filter((k) => k === 'submitted' || evs.some((e) => e.type === k)).map((k) => <span key={k} className="flex items-center gap-1"><span className={cx('size-2 rounded-full', EVENT_STYLE[k].cls)} />{EVENT_STYLE[k].label}</span>)}
       </div>
     </div>
   );
@@ -163,7 +178,8 @@ export function CandidateReport() {
   const { id } = useParams();
   const [r, setR] = useState<Report | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  useEffect(() => { api.get<Report>(`/api/attempts/${id}`).then(setR).catch((e) => setErr(e.message)); }, [id]);
+  const load = useCallback(() => { api.get<Report>(`/api/attempts/${id}`).then(setR).catch((e) => setErr(e.message)); }, [id]);
+  useEffect(load, [load]);
   if (err) return <Page><ErrorBox error={err} /></Page>;
   if (!r) return <PageLoader />;
   const a = r.attempt;
@@ -212,6 +228,12 @@ export function CandidateReport() {
         </Card>
       )}
 
+      {(r.media.length > 0 || r.assessment.proctoring.webcam || r.assessment.proctoring.identityCheck) && (
+        <div className="mt-4"><ProctoringPanel attemptId={a.id} media={r.media} startedAt={a.startedAt} retentionDays={r.assessment.retentionDays} webcam={r.assessment.proctoring.webcam} onDeleted={load} /></div>
+      )}
+      {a.status !== 'invited' && (
+        <div className="mt-4"><AccessPanel attemptId={a.id} access={r.access} sharedWith={r.integrity?.access.sharedWith ?? []} startedAt={a.startedAt} canUnlock={r.assessment.proctoring.singleDevice && a.status === 'in_progress' && a.deviceLocked} onChanged={load} /></div>
+      )}
       <div className="mt-4"><AiReview r={r} onReview={(review) => setR({ ...r, ai: { ...r.ai, review } })} /></div>
 
       <div className="mt-4 space-y-4">
@@ -223,6 +245,7 @@ export function CandidateReport() {
                 <span className="text-sm text-ink-500">Q{i + 1}</span>
                 <h3 className="font-semibold text-ink-100">{q.title}</h3>
                 <Badge>{q.type}</Badge><Difficulty d={q.difficulty} />
+                {q.pool && <Badge className="border-ember-500/40 text-ember-200">pool {q.pool}</Badge>}
                 <span className={cx('ml-auto text-sm font-semibold tabular-nums', q.score >= q.points ? 'text-emerald-300' : q.score > 0 ? 'text-amber-300' : 'text-rose-300')}>{Math.round(q.score * 100) / 100}/{q.points}</span>
               </div>
               <details className="mb-3 text-sm"><summary className="cursor-pointer text-xs text-ink-400 hover:text-ink-200">Show question</summary><div className="mt-2 rounded-lg border border-ink-800 p-3"><Markdown>{q.statement}</Markdown></div></details>

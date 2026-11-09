@@ -10,8 +10,8 @@ import { ago, cx, duration, pct } from '../lib/format';
 interface Attempt { id: number; name: string; email: string; status: 'invited' | 'in_progress' | 'submitted'; token: string; startedAt: number | null; submittedAt: number | null; score: number | null; maxScore: number | null; integrity: { score: number; level: string; flags: number } | null; durationMs: number | null }
 interface Detail {
   assessment: { id: number; title: string; description: string; durationMin: number; status: string };
-  questions: { id: number; title: string; type: string; difficulty: 'easy' | 'medium' | 'hard'; points: number }[];
-  perQuestion: { questionId: number; avgPct: number }[];
+  questions: { id: number; title: string; type: string; difficulty: 'easy' | 'medium' | 'hard'; points: number; pool: string | null }[];
+  perQuestion: { questionId: number; avgPct: number; candidates: number }[];
   attempts: Attempt[];
 }
 interface Match { questionTitle: string; aLabel: string; bLabel: string; similarity: number; reference: boolean; a: string; b: string }
@@ -142,11 +142,12 @@ export function AssessmentDetail() {
             <h2 className="mb-3 font-semibold text-ink-100">Questions</h2>
             <ul className="space-y-2.5">
               {d.questions.map((q) => {
-                const avg = d.perQuestion.find((p) => p.questionId === q.id)?.avgPct ?? 0;
+                const pq = d.perQuestion.find((p) => p.questionId === q.id);
+                const avg = pq?.avgPct ?? 0;
                 return (
                   <li key={q.id} className="text-sm">
-                    <div className="flex items-center gap-2"><span className="min-w-0 flex-1 truncate text-ink-200">{q.title}</span><Difficulty d={q.difficulty} /><span className="text-xs text-ink-500">{q.points}p</span></div>
-                    <div className="mt-1 flex items-center gap-2"><div className="h-1.5 flex-1 overflow-hidden rounded-full bg-ink-800"><div className="h-full bg-ember-500" style={{ width: `${avg}%` }} /></div><span className="w-9 text-right text-xs tabular-nums text-ink-400">{submitted.length ? `${avg}%` : '—'}</span></div>
+                    <div className="flex items-center gap-2"><span className="min-w-0 flex-1 truncate text-ink-200">{q.title}</span>{q.pool && <span className="rounded bg-ember-500/10 px-1 text-[10px] text-ember-200" title={`Pool ${q.pool}: drawn per candidate`}>{q.pool}</span>}<Difficulty d={q.difficulty} /><span className="text-xs text-ink-500">{q.points}p</span></div>
+                    <div className="mt-1 flex items-center gap-2"><div className="h-1.5 flex-1 overflow-hidden rounded-full bg-ink-800"><div className="h-full bg-ember-500" style={{ width: `${avg}%` }} /></div><span className="w-9 text-right text-xs tabular-nums text-ink-400" title={q.pool ? `${pq?.candidates ?? 0} candidates received this question` : undefined}>{pq?.candidates ? `${avg}%` : '—'}</span></div>
                   </li>
                 );
               })}

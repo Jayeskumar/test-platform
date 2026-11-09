@@ -75,6 +75,8 @@ export interface PlagiarismDoc {
   code: string;
   /** Reference documents are compared against candidates but not flagged themselves. */
   reference?: boolean;
+  /** Starter code everyone received (a MOSS-style "base file"): its fingerprints are ignored. */
+  base?: string;
 }
 
 export interface PlagiarismMatch {
@@ -88,6 +90,8 @@ export interface PlagiarismMatch {
 
 /** Minimum token count for a comparison to be meaningful. */
 const MIN_TOKENS = 25;
+/** Minimum number of original fingerprints (after removing starter code) to compare at all. */
+const MIN_FINGERPRINTS = 5;
 
 /**
  * Short programs collide more often by chance (there are only so many ways to
@@ -99,10 +103,22 @@ export function thresholdFor(minTokens: number, base = 0.7): number {
 }
 
 export function findMatches(docs: PlagiarismDoc[], threshold = 0.7): PlagiarismMatch[] {
+  const baseCache = new Map<string, Set<number>>();
+  const baseFp = (b?: string) => {
+    if (!b) return null;
+    if (!baseCache.has(b)) baseCache.set(b, fingerprints(b));
+    return baseCache.get(b)!;
+  };
   const prepared = docs
-    .map((d) => ({ ...d, len: normalizeTokens(d.code).length }))
-    .filter((d) => d.len >= MIN_TOKENS)
-    .map((d) => ({ ...d, fp: fingerprints(d.code) }));
+    .map((d) => {
+      const fp = fingerprints(d.code);
+      const base = baseFp(d.base);
+      if (base) for (const h of base) fp.delete(h);
+      const len = normalizeTokens(d.code).length - (d.base ? normalizeTokens(d.base).length : 0);
+      return { ...d, fp, len };
+    })
+    // Untouched starter code (or nearly so) is nobody's work: never compared.
+    .filter((d) => d.len >= MIN_TOKENS && d.fp.size >= MIN_FINGERPRINTS);
   const out: PlagiarismMatch[] = [];
   for (let i = 0; i < prepared.length; i++) {
     for (let j = i + 1; j < prepared.length; j++) {

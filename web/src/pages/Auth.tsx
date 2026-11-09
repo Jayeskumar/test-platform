@@ -34,7 +34,10 @@ export function Login() {
     setErr(null);
     try {
       const u = await login(email, password);
-      nav(loc.state?.from ?? (isStaff(u) ? '/hiring' : '/problems'));
+      // Only follow same-site paths (never "//host" or "/\\host" style redirects).
+      const from = loc.state?.from;
+      const safe = typeof from === 'string' && /^\/(?![\/\\])/.test(from) ? from : null;
+      nav(safe ?? (isStaff(u) ? '/hiring' : '/problems'));
     } catch (e: any) { setErr(e.message); } finally { setBusy(false); }
   };
   return (

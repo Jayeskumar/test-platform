@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { Db, setDb } from '../src/db/index.js';
 import { Sandbox } from '../src/judge/sandbox.js';
+import { setMediaRoot } from '../src/media.js';
 import { JudgeService, setService } from '../src/service.js';
 
 let sandbox: Sandbox | null = null;
@@ -20,6 +21,7 @@ export async function testSandbox(): Promise<Sandbox> {
 export async function freshEnv() {
   const db = new Db(':memory:');
   setDb(db);
+  setMediaRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'crucible-media-')));
   const svc = new JudgeService(await testSandbox());
   await svc.init({ selfTest: false });
   setService(svc);

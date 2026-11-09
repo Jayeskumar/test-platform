@@ -1,9 +1,12 @@
 import crypto from 'node:crypto';
+import fs from 'node:fs';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { aiEnabled, reviewAttempt } from '../ai.js';
 import { HttpError, requireStaff, type User } from '../auth.js';
 import { getDb, now, parseJson } from '../db/index.js';
+import { deleteProctoringData, mediaPath } from '../media.js';
+import { attemptQuestionIds } from '../proctor.js';
 import { presentSubmission } from '../questions.js';
 import { assessmentPlagiarism, computeIntegrity, gradeMcq, recomputeAttempt } from '../scoring.js';
 import { assessmentSettings } from './take.js';
@@ -20,11 +23,34 @@ const AssessmentBody = z.object({
       requireFullscreen: z.boolean().default(false),
       detectPaste: z.boolean().default(true),
       recordPlayback: z.boolean().default(true),
+      webcam: z.boolean().default(false),
+      webcamIntervalSec: z.number().int().min(15).max(300).default(45),
+      identityCheck: z.boolean().default(false),
+      blockExternalPaste: z.boolean().default(false),
+      blockCopy: z.boolean().default(false),
+      detectMultiMonitor: z.boolean().default(true),
+      singleDevice: z.boolean().default(false),
     }).prefault({}),
     showScoreToCandidate: z.boolean().default(false),
     shuffleQuestions: z.boolean().default(false),
+    pools: z.record(z.string().trim().min(1).max(30), z.object({ draw: z.number().int().min(1).max(30) })).default({}),
+    retentionDays: z.number().int().min(1).max(730).default(90),
   }).prefault({}),
-  questions: z.array(z.object({ questionId: z.number().int(), points: z.number().int().min(1).max(1000) })).min(1).max(30),
+  questions: z.array(z.object({
+    questionId: z.number().int(),
+    points: z.number().int().min(1).max(1000),
+    pool: z.string().trim().max(30).nullish().transform((v) => v || null),
+  })).min(1).max(60),
+}).superRefine((b, ctx) => {
+  const pools = new Map<string, number[]>();
+  for (const q of b.questions) if (q.pool) pools.set(q.pool, [...(pools.get(q.pool) ?? []), q.points]);
+  for (const [name, pts] of pools) {
+    if (new Set(pts).size > 1) ctx.addIssue({ code: 'custom', path: ['questions'], message: `every question in pool "${name}" must be worth the same points` });
+    const draw = b.settings.pools[name]?.draw ?? pts.length;
+    if (draw > pts.length) ctx.addIssue({ code: 'custom', path: ['settings', 'pools'], message: `pool "${name}" draws ${draw} but only has ${pts.length} questions` });
+  }
+  // Keep only pools that are in use, defaulting to drawing one question.
+  b.settings.pools = Object.fromEntries([...pools.keys()].map((k) => [k, { draw: b.settings.pools[k]?.draw ?? 1 }]));
 });
 
 const InviteBody = z.object({
@@ -54,7 +80,7 @@ export function createAssessment(body: unknown, ownerId: number): number {
     ).id;
     b.questions.forEach((q, i) => {
       if (!db.get('SELECT 1 FROM questions WHERE id = ?', q.questionId)) throw new HttpError(400, `Question ${q.questionId} does not exist.`);
-      db.run('INSERT INTO assessment_questions (assessment_id, question_id, points, ord) VALUES (?, ?, ?, ?)', id, q.questionId, q.points, i);
+      db.run('INSERT INTO assessment_questions (assessment_id, question_id, points, ord, pool) VALUES (?, ?, ?, ?, ?)', id, q.questionId, q.points, i, q.pool ?? null);
     });
     return id;
   });
@@ -122,20 +148,18 @@ export async function assessmentRoutes(app: FastifyInstance) {
     const a = ownedAssessment(user, Number((req.params as any).id));
     const db = getDb();
     const questions = db.all<any>(
-      `SELECT q.id, q.slug, q.title, q.type, q.difficulty, q.tags, aq.points, aq.ord FROM assessment_questions aq
+      `SELECT q.id, q.slug, q.title, q.type, q.difficulty, q.tags, aq.points, aq.ord, aq.pool FROM assessment_questions aq
        JOIN questions q ON q.id = aq.question_id WHERE aq.assessment_id = ? ORDER BY aq.ord`,
       a.id,
     ).map((q) => ({ ...q, tags: parseJson(q.tags, []) }));
     const attempts = db.all<any>('SELECT * FROM attempts WHERE assessment_id = ? ORDER BY COALESCE(score, -1) DESC, created_at DESC', a.id);
     // Per-question averages across submitted attempts.
+    // Averages only over candidates who actually received the question (pools).
+    const submittedAttempts = attempts.filter((t) => t.status === 'submitted');
     const perQuestion = questions.map((q) => {
-      const r = db.get<any>(
-        `SELECT AVG(an.score) AS avg, COUNT(*) AS n FROM answers an JOIN attempts t ON t.id = an.attempt_id
-         WHERE t.assessment_id = ? AND t.status = 'submitted' AND an.question_id = ?`,
-        a.id, q.id,
-      );
-      const submitted = attempts.filter((t) => t.status === 'submitted').length || 1;
-      return { questionId: q.id, avgPct: r?.n ? Math.round(((r.avg * r.n) / submitted / q.points) * 100) : 0 };
+      const got = submittedAttempts.filter((t) => attemptQuestionIds(t).includes(q.id));
+      const total = got.reduce((sum, t) => sum + (db.get<any>('SELECT score FROM answers WHERE attempt_id = ? AND question_id = ?', t.id, q.id)?.score ?? 0), 0);
+      return { questionId: q.id, avgPct: got.length ? Math.round((total / got.length / q.points) * 100) : 0, candidates: got.length };
     });
     return {
       assessment: {
@@ -159,12 +183,15 @@ export async function assessmentRoutes(app: FastifyInstance) {
         'UPDATE assessments SET title = ?, description = ?, duration_min = ?, settings = ?, status = ? WHERE id = ?',
         b.title, b.description, b.durationMin, JSON.stringify(b.settings), b.status, a.id,
       );
-      const current = db.all<any>('SELECT question_id, points FROM assessment_questions WHERE assessment_id = ? ORDER BY ord', a.id);
-      const same = current.length === b.questions.length && current.every((c, i) => c.question_id === b.questions[i].questionId);
-      if (!same && started) throw new HttpError(409, 'Questions cannot change once candidates have started. Points and settings can.');
+      const current = db.all<any>('SELECT question_id, points, pool FROM assessment_questions WHERE assessment_id = ? ORDER BY ord', a.id);
+      const same = current.length === b.questions.length && current.every((c, i) => c.question_id === b.questions[i].questionId && (c.pool ?? null) === b.questions[i].pool);
+      const prevPools = JSON.stringify(assessmentSettings(a.settings).pools);
+      if ((!same || prevPools !== JSON.stringify(b.settings.pools)) && started) {
+        throw new HttpError(409, 'Questions and pools cannot change once candidates have started. Points and settings can.');
+      }
       db.run('DELETE FROM assessment_questions WHERE assessment_id = ?', a.id);
       b.questions.forEach((q, i) =>
-        db.run('INSERT INTO assessment_questions (assessment_id, question_id, points, ord) VALUES (?, ?, ?, ?)', a.id, q.questionId, q.points, i),
+        db.run('INSERT INTO assessment_questions (assessment_id, question_id, points, ord, pool) VALUES (?, ?, ?, ?, ?)', a.id, q.questionId, q.points, i, q.pool ?? null),
       );
     });
     for (const t of db.all<any>("SELECT id FROM attempts WHERE assessment_id = ? AND status != 'invited'", a.id)) recomputeAttempt(t.id);
@@ -182,6 +209,7 @@ export async function assessmentRoutes(app: FastifyInstance) {
     const user = requireStaff(req);
     const at = ownedAttempt(user, Number((req.params as any).id));
     if (at.status !== 'invited') throw new HttpError(409, 'Only unused invitations can be revoked.');
+    deleteProctoringData(at.id); // identity photos may exist before the test starts
     getDb().run('DELETE FROM attempts WHERE id = ?', at.id);
     return { ok: true };
   });
@@ -198,10 +226,11 @@ export async function assessmentRoutes(app: FastifyInstance) {
     const at = ownedAttempt(user, Number((req.params as any).id));
     const db = getDb();
     const asmt = db.get<any>('SELECT * FROM assessments WHERE id = ?', at.assessment_id);
+    const drawn = new Set(attemptQuestionIds(at));
     const qs = db.all<any>(
-      `SELECT q.*, aq.points, aq.ord FROM assessment_questions aq JOIN questions q ON q.id = aq.question_id WHERE aq.assessment_id = ? ORDER BY aq.ord`,
+      `SELECT q.*, aq.points, aq.ord, aq.pool FROM assessment_questions aq JOIN questions q ON q.id = aq.question_id WHERE aq.assessment_id = ? ORDER BY aq.ord`,
       at.assessment_id,
-    );
+    ).filter((q) => at.status === 'invited' || drawn.has(q.id));
     const events = db.all<any>('SELECT id, question_id, type, detail, t FROM events WHERE attempt_id = ? ORDER BY t', at.id)
       .map((e) => ({ ...e, detail: parseJson(e.detail, {}) }));
     const questions = qs.map((q) => {
@@ -213,7 +242,7 @@ export async function assessmentRoutes(app: FastifyInstance) {
       const views = events.filter((e) => e.question_id === q.id && e.type === 'question_view').length;
       const base = {
         id: q.id, title: q.title, type: q.type, difficulty: q.difficulty, points: q.points, statement: q.statement,
-        score: ans?.score ?? 0, views,
+        score: ans?.score ?? 0, views, pool: q.pool ?? null,
       };
       if (q.type === 'mcq') {
         const choice = parseJson<any>(ans?.choice, null);
@@ -238,14 +267,52 @@ export async function assessmentRoutes(app: FastifyInstance) {
     const percentile = peers.length && at.status === 'submitted'
       ? Math.round((peers.filter((s) => s < (at.score ?? 0)).length + 0.5 * peers.filter((s) => s === (at.score ?? 0)).length) / peers.length * 100)
       : null;
+    const settings = assessmentSettings(asmt.settings);
+    const media = db.all<any>('SELECT id, kind, t, faces, reason, bytes FROM media WHERE attempt_id = ? ORDER BY t', at.id)
+      .map((m) => ({ ...m, url: `/api/media/${m.id}` }));
+    const access = db.all<any>('SELECT t, ip, user_agent, fingerprint, device_id FROM access_log WHERE attempt_id = ? ORDER BY t', at.id);
     return {
-      attempt: { ...attemptSummary(at), percentile },
-      assessment: { id: asmt.id, title: asmt.title, durationMin: asmt.duration_min },
+      attempt: { ...attemptSummary(at), percentile, deviceLocked: !!at.device_id },
+      assessment: {
+        id: asmt.id, title: asmt.title, durationMin: asmt.duration_min,
+        proctoring: settings.proctoring, retentionDays: settings.retentionDays, usesPools: Object.keys(settings.pools).length > 0,
+      },
+      media,
+      access,
       questions,
       events,
       integrity,
       ai: { enabled: aiEnabled(), review: parseJson(at.review, null) },
     };
+  });
+
+  /** Serve one proctoring image (staff who own the assessment only). */
+  app.get('/api/media/:id', async (req, reply) => {
+    const user = requireStaff(req);
+    const m = getDb().get<any>('SELECT * FROM media WHERE id = ?', Number((req.params as any).id));
+    if (!m) throw new HttpError(404, 'Image not found.');
+    ownedAttempt(user, m.attempt_id);
+    const file = mediaPath(m);
+    if (!fs.existsSync(file)) throw new HttpError(404, 'Image not found.');
+    reply.header('Cache-Control', 'private, max-age=3600').header('X-Content-Type-Options', 'nosniff').type(m.mime);
+    return reply.send(fs.createReadStream(file));
+  });
+
+  /** Delete webcam images, ID photos and IP/device logs for an attempt (e.g. on a data request). */
+  app.delete('/api/attempts/:id/proctoring', async (req) => {
+    const user = requireStaff(req);
+    const at = ownedAttempt(user, Number((req.params as any).id));
+    deleteProctoringData(at.id);
+    return { ok: true };
+  });
+
+  /** Let a candidate continue in a different browser (e.g. after a crash) when the device lock is on. */
+  app.post('/api/attempts/:id/unlock-device', async (req) => {
+    const user = requireStaff(req);
+    const at = ownedAttempt(user, Number((req.params as any).id));
+    getDb().run('UPDATE attempts SET device_id = NULL WHERE id = ?', at.id);
+    getDb().run('INSERT INTO events (attempt_id, type, detail, t) VALUES (?, ?, ?, ?)', at.id, 'device_unlocked', JSON.stringify({ by: user.email }), now());
+    return { ok: true };
   });
 
   app.post('/api/attempts/:id/ai-review', async (req) => {

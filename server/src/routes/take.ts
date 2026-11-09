@@ -1,16 +1,40 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import type { FastifyRequest } from 'fastify';
 import { HttpError } from '../auth.js';
 import { getDb, now, parseJson } from '../db/index.js';
+import { decodeImage, MAX_IMAGE_BYTES, storeMedia } from '../media.js';
+import { attemptQuestionIds, drawQuestions, enforceDevice, expectedShape, recordAccess } from '../proctor.js';
 import { publicQuestion } from '../questions.js';
 import { computeIntegrity, recomputeAttempt } from '../scoring.js';
 import { getService, type QuestionRow } from '../service.js';
 
 export const DEFAULT_SETTINGS = {
   languages: [] as string[],
-  proctoring: { trackTabs: true, requireFullscreen: false, detectPaste: true, recordPlayback: true },
+  proctoring: {
+    trackTabs: true,
+    requireFullscreen: false,
+    detectPaste: true,
+    recordPlayback: true,
+    /** Periodic webcam snapshots with on-device face detection. */
+    webcam: false,
+    webcamIntervalSec: 45,
+    /** Selfie + photo ID before the test starts. */
+    identityCheck: false,
+    /** Only allow pasting text that was copied inside the test. */
+    blockExternalPaste: false,
+    /** Prevent copying the question text out of the test. */
+    blockCopy: false,
+    detectMultiMonitor: true,
+    /** Refuse a second browser/device once the test has started. */
+    singleDevice: false,
+  },
   showScoreToCandidate: false,
   shuffleQuestions: false,
+  /** Question pools: each candidate gets `draw` questions from each pool. */
+  pools: {} as Record<string, { draw: number }>,
+  /** Days to keep webcam images, ID photos and IP/device logs after submission. */
+  retentionDays: 90,
 };
 
 export function assessmentSettings(raw: unknown) {
@@ -24,8 +48,15 @@ function attemptByToken(token: string) {
   return a;
 }
 
-/** Returns the attempt if the candidate may still act on it; finalizes it if time ran out. */
-export function activeAttemptByToken(token: string) {
+function settingsFor(attempt: { assessment_id: number }) {
+  return assessmentSettings(getDb().get<any>('SELECT settings FROM assessments WHERE id = ?', attempt.assessment_id)?.settings);
+}
+
+/**
+ * Returns the attempt if the candidate may still act on it; finalizes it if time ran out.
+ * With a request, also logs the access and enforces the device lock.
+ */
+export function activeAttemptByToken(token: string, req?: FastifyRequest) {
   const a = attemptByToken(token);
   if (a.status === 'invited') throw new HttpError(409, 'Start the test first.');
   if (a.status === 'submitted') throw new HttpError(410, 'This test has already been submitted.');
@@ -33,14 +64,16 @@ export function activeAttemptByToken(token: string) {
     void finalizeAttempt(a.id, 'timeout');
     throw new HttpError(410, 'Time is up — your answers have been submitted.');
   }
+  if (req) {
+    recordAccess(a.id, req);
+    enforceDevice(a, req, settingsFor(a).proctoring.singleDevice);
+  }
   return a;
 }
 
 export function attemptHasQuestion(attemptId: number, questionId: number) {
-  return !!getDb().get(
-    'SELECT 1 FROM attempts a JOIN assessment_questions aq ON aq.assessment_id = a.assessment_id WHERE a.id = ? AND aq.question_id = ?',
-    attemptId, questionId,
-  );
+  const a = getDb().get<any>('SELECT assessment_id, question_ids FROM attempts WHERE id = ?', attemptId);
+  return !!a && attemptQuestionIds(a).includes(questionId);
 }
 
 /**
@@ -93,9 +126,19 @@ const AnswerBody = z.object({
   choice: z.union([z.string(), z.array(z.string())]).optional(),
 });
 
+const MediaBody = z.object({
+  kind: z.enum(['snapshot', 'identity_selfie', 'identity_document']),
+  image: z.string().max(700_000),
+  faces: z.number().int().min(0).max(20).nullish(),
+  reason: z.enum(['periodic', 'start', 'no_face', 'multiple_faces', 'identity']).default('periodic'),
+});
+
 const EventsBody = z.object({
   events: z.array(z.object({
-    type: z.enum(['tab_hidden', 'tab_visible', 'blur', 'focus', 'paste', 'copy', 'fullscreen_exit', 'fullscreen_enter', 'question_view', 'run']),
+    type: z.enum([
+      'tab_hidden', 'tab_visible', 'blur', 'focus', 'paste', 'copy', 'fullscreen_exit', 'fullscreen_enter', 'question_view', 'run',
+      'paste_blocked', 'copy_blocked', 'multi_monitor', 'duplicate_tab', 'camera_lost', 'camera_restored',
+    ]),
     questionId: z.number().int().nullish(),
     detail: z.record(z.string(), z.any()).optional(),
     t: z.number().optional(),
@@ -113,10 +156,16 @@ export async function takeRoutes(app: FastifyInstance) {
     }
     const asmt = db.get<any>('SELECT * FROM assessments WHERE id = ?', a.assessment_id);
     const settings = assessmentSettings(asmt.settings);
-    const qrows = db.all<any>(
-      `SELECT q.*, aq.points, aq.ord FROM assessment_questions aq JOIN questions q ON q.id = aq.question_id WHERE aq.assessment_id = ? ORDER BY aq.ord`,
+    recordAccess(a.id, req);
+    if (a.status === 'in_progress') enforceDevice(a, req, settings.proctoring.singleDevice);
+    const allRows = db.all<any>(
+      `SELECT q.*, aq.points, aq.ord, aq.pool FROM assessment_questions aq JOIN questions q ON q.id = aq.question_id WHERE aq.assessment_id = ? ORDER BY aq.ord`,
       a.assessment_id,
     );
+    const drawn = a.status === 'invited' ? null : new Set(attemptQuestionIds(a));
+    const qrows = drawn ? allRows.filter((q) => drawn.has(q.id)) : allRows;
+    const shape = expectedShape(allRows, settings.pools);
+    const media = db.all<any>('SELECT kind, COUNT(*) AS n FROM media WHERE attempt_id = ? GROUP BY kind', a.id);
     const base = {
       attempt: {
         status: a.status,
@@ -134,14 +183,21 @@ export async function takeRoutes(app: FastifyInstance) {
         description: asmt.description,
         durationMin: asmt.duration_min,
         status: asmt.status,
-        questionCount: qrows.length,
-        totalPoints: qrows.reduce((s, q) => s + q.points, 0),
-        breakdown: {
-          coding: qrows.filter((q) => q.type === 'coding').length,
-          sql: qrows.filter((q) => q.type === 'sql').length,
-          mcq: qrows.filter((q) => q.type === 'mcq').length,
-        },
-        settings: { languages: settings.languages, proctoring: settings.proctoring },
+        questionCount: drawn ? qrows.length : shape.count,
+        totalPoints: drawn ? qrows.reduce((s, q) => s + q.points, 0) : shape.points,
+        breakdown: drawn
+          ? {
+              coding: qrows.filter((q) => q.type === 'coding').length,
+              sql: qrows.filter((q) => q.type === 'sql').length,
+              mcq: qrows.filter((q) => q.type === 'mcq').length,
+            }
+          : { coding: shape.coding, sql: shape.sql, mcq: shape.mcq },
+        usesPools: Object.keys(settings.pools).length > 0 && allRows.some((q) => q.pool),
+        settings: { languages: settings.languages, proctoring: settings.proctoring, retentionDays: settings.retentionDays },
+      },
+      identity: {
+        selfie: media.some((m) => m.kind === 'identity_selfie'),
+        document: media.some((m) => m.kind === 'identity_document'),
       },
     };
     if (a.status !== 'in_progress') return base;
@@ -172,12 +228,29 @@ export async function takeRoutes(app: FastifyInstance) {
     const a = attemptByToken(token);
     const asmt = db.get<any>('SELECT * FROM assessments WHERE id = ?', a.assessment_id);
     if (asmt.status !== 'active') throw new HttpError(403, 'This assessment is not accepting candidates right now.');
+    const settings = assessmentSettings(asmt.settings);
+    recordAccess(a.id, req);
     if (a.status === 'invited') {
+      if (settings.proctoring.identityCheck) {
+        const kinds = new Set(db.all<any>('SELECT DISTINCT kind FROM media WHERE attempt_id = ?', a.id).map((m) => m.kind));
+        if (!kinds.has('identity_selfie') || !kinds.has('identity_document')) {
+          throw new HttpError(409, 'Take the identity photos before starting.');
+        }
+      }
+      const rows = db.all<any>('SELECT question_id, pool, ord FROM assessment_questions WHERE assessment_id = ?', a.assessment_id);
+      const drawnIds = drawQuestions(rows, settings.pools, token);
       const t = now();
-      db.run(
-        "UPDATE attempts SET status = 'in_progress', candidate_name = ?, started_at = ?, deadline_at = ? WHERE id = ? AND status = 'invited'",
-        name, t, t + asmt.duration_min * 60_000, a.id,
+      const upd = db.run(
+        "UPDATE attempts SET status = 'in_progress', candidate_name = ?, started_at = ?, deadline_at = ?, question_ids = ? WHERE id = ? AND status = 'invited'",
+        name, t, t + asmt.duration_min * 60_000, JSON.stringify(drawnIds), a.id,
       );
+      if (upd.changes) {
+        a.device_id = null;
+        enforceDevice(a, req, settings.proctoring.singleDevice);
+        recomputeAttempt(a.id);
+      }
+    } else if (a.status === 'in_progress') {
+      enforceDevice(a, req, settings.proctoring.singleDevice);
     }
     return { ok: true };
   });
@@ -186,7 +259,7 @@ export async function takeRoutes(app: FastifyInstance) {
     const { token, questionId } = req.params as { token: string; questionId: string };
     const qid = Number(questionId);
     const body = AnswerBody.parse(req.body);
-    const a = activeAttemptByToken(token);
+    const a = activeAttemptByToken(token, req);
     if (!attemptHasQuestion(a.id, qid)) throw new HttpError(404, 'Question not found.');
     const db = getDb();
     const t = now();
@@ -215,7 +288,7 @@ export async function takeRoutes(app: FastifyInstance) {
   app.post('/api/take/:token/events', async (req) => {
     const { token } = req.params as { token: string };
     const { events } = EventsBody.parse(req.body);
-    const a = activeAttemptByToken(token);
+    const a = activeAttemptByToken(token, req);
     const db = getDb();
     db.tx(() => {
       for (const e of events) {
@@ -228,10 +301,45 @@ export async function takeRoutes(app: FastifyInstance) {
     return { ok: true };
   });
 
+  /** Webcam snapshots and identity photos. Only accepted when the assessment enables them. */
+  app.post('/api/take/:token/media', { bodyLimit: 1024 * 1024 }, async (req, reply) => {
+    const { token } = req.params as { token: string };
+    const body = MediaBody.parse(req.body);
+    const db = getDb();
+    const identity = body.kind !== 'snapshot';
+    let a = attemptByToken(token);
+    if (identity && a.status === 'invited') recordAccess(a.id, req);
+    else a = activeAttemptByToken(token, req);
+    const settings = settingsFor(a);
+    if (identity ? !settings.proctoring.identityCheck : !settings.proctoring.webcam) {
+      throw new HttpError(403, 'This assessment does not collect these images.');
+    }
+    const img = decodeImage(body.image);
+    if (!img) throw new HttpError(400, 'Images must be JPEG or PNG.');
+    if (img.buf.length > MAX_IMAGE_BYTES) throw new HttpError(413, 'Image is too large.');
+    const t = now();
+    if (identity) {
+      const n = db.get<any>('SELECT COUNT(*) AS n FROM media WHERE attempt_id = ? AND kind = ?', a.id, body.kind).n;
+      if (n >= 5) throw new HttpError(429, 'Too many identity photos — the latest ones are already saved.');
+    } else {
+      const last = db.get<any>("SELECT MAX(t) AS t FROM media WHERE attempt_id = ? AND kind = 'snapshot'", a.id).t;
+      if (last && t - last < 8000) return reply.status(429).send({ error: 'Snapshot rate limit.' });
+    }
+    const faces = body.faces ?? null;
+    const id = storeMedia(a.id, body.kind, img, faces, body.reason, t);
+    if (body.kind === 'snapshot' && faces != null && faces !== 1) {
+      db.run('INSERT INTO events (attempt_id, type, detail, t) VALUES (?, ?, ?, ?)', a.id, faces === 0 ? 'no_face' : 'multiple_faces', JSON.stringify({ mediaId: id, faces }), t);
+    }
+    return { ok: true, id };
+  });
+
   app.post('/api/take/:token/submit', async (req) => {
     const { token } = req.params as { token: string };
     const a = attemptByToken(token);
-    if (a.status === 'in_progress') await finalizeAttempt(a.id, 'candidate');
+    if (a.status === 'in_progress') {
+      activeAttemptByToken(token, req); // device lock applies to finishing too
+      await finalizeAttempt(a.id, 'candidate');
+    }
     return { ok: true };
   });
 }

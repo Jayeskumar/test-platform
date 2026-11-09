@@ -142,6 +142,20 @@ describe('plagiarism', () => {
   const different = `import sys\nfrom itertools import combinations\nvals = list(map(int, sys.stdin.readline().split()))\nt = int(sys.stdin.readline())\nprint(sum(1 for p, q in combinations(vals, 2) if p + q == t))\n`;
   test('normalization removes identifiers and comments', () => assert.deepEqual(normalizeTokens(a), normalizeTokens(renamed)));
   test('renamed copy is detected', () => assert.equal(similarity(fingerprints(a), fingerprints(renamed)), 1));
+  test('shared starter code is ignored (base file)', async () => {
+    const { LANGUAGE_MAP } = await import('../src/judge/languages.js');
+    const tpl = LANGUAGE_MAP.get('cpp')!.template;
+    // Two untouched templates are not a match.
+    assert.equal(findMatches([{ id: '1', label: 'A', code: tpl, base: tpl }, { id: '2', label: 'B', code: tpl, base: tpl }]).length, 0);
+    // Two different short solutions written inside the same template are not a match either.
+    const fill = (body: string) => tpl.replace('// Read input with cin and print the answer with cout', body);
+    const x = fill('long long n, s = 0; cin >> n; vector<long long> v(n); for (auto &e : v) cin >> e; sort(v.begin(), v.end()); for (int i = 0; i < n; i++) s += v[i] * (i + 1); cout << s << endl;');
+    const y = fill('int q; cin >> q; map<string, int> m; while (q--) { string w; cin >> w; m[w]++; } int best = 0; for (auto &[k, c] : m) best = max(best, c); cout << best << endl;');
+    assert.equal(findMatches([{ id: '1', label: 'A', code: x, base: tpl }, { id: '2', label: 'B', code: y, base: tpl }]).length, 0);
+    // A copy inside the template is still caught.
+    assert.equal(findMatches([{ id: '1', label: 'A', code: x, base: tpl }, { id: '2', label: 'B', code: x.replace(/\bs\b/g, 'acc'), base: tpl }]).length, 1);
+  });
+
   test('independent solution is not flagged', () => {
     assert.ok(similarity(fingerprints(a), fingerprints(different)) < 0.3);
     assert.equal(findMatches([{ id: '1', label: 'A', code: a }, { id: '2', label: 'B', code: different }]).length, 0);

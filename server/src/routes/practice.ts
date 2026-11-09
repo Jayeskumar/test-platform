@@ -84,7 +84,7 @@ export async function practiceRoutes(app: FastifyInstance) {
     const user = userFromRequest(req);
     let attemptId: number | null = null;
     if (body.attemptToken) {
-      const attempt = activeAttemptByToken(body.attemptToken);
+      const attempt = activeAttemptByToken(body.attemptToken, req);
       attemptId = attempt.id;
     } else if (!user) {
       throw new HttpError(401, 'Sign in to run code.');

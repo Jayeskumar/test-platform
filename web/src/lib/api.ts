@@ -4,11 +4,18 @@ export class ApiError extends Error {
   }
 }
 
+/** Headers added to every request (the test page uses this for device binding). */
+let extraHeaders: Record<string, string> = {};
+export function setExtraHeaders(h: Record<string, string>) {
+  extraHeaders = h;
+}
+export const getExtraHeaders = () => extraHeaders;
+
 async function request<T>(method: string, url: string, body?: unknown): Promise<T> {
   const res = await fetch(url, {
     method,
     credentials: 'same-origin',
-    headers: body !== undefined ? { 'Content-Type': 'application/json' } : undefined,
+    headers: { ...extraHeaders, ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}) },
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
   const text = await res.text();

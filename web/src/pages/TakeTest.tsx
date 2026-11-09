@@ -1,18 +1,26 @@
-import { AlertTriangle, CheckCircle2, Clock, Code2, Database, Eye, ListChecks, Maximize, Send } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Clock, Code2, Copy, Database, Eye, ListChecks, Maximize, MonitorSmartphone, Send, ShieldCheck } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { Logo } from '../components/Layout';
 import { Markdown } from '../components/Markdown';
 import { Button, Card, Difficulty, ErrorBox, Input, Label, PageLoader } from '../components/ui';
+import { type ProctoringSettings, SystemCheck } from '../components/proctor/SystemCheck';
+import { WebcamMonitor } from '../components/proctor/WebcamMonitor';
 import { Workspace } from '../components/Workspace';
-import { api } from '../lib/api';
+import { api, getExtraHeaders, setExtraHeaders } from '../lib/api';
+import { deviceFingerprint, deviceId, screenIsExtended, stopCamera } from '../lib/proctor';
 import { cx, duration } from '../lib/format';
 import type { Problem } from '../lib/types';
 
 type TQ = Problem & { points: number; answer: { language: string | null; code: string | null; choice: any } | null };
 interface TakeData {
   attempt: { status: 'invited' | 'in_progress' | 'submitted'; candidateName: string; candidateEmail: string; deadlineAt: number | null; serverNow: number; score?: number; maxScore?: number };
-  assessment: { title: string; description: string; durationMin: number; status: string; questionCount: number; totalPoints: number; breakdown: { coding: number; sql: number; mcq: number }; settings: { languages: string[]; proctoring: { trackTabs: boolean; requireFullscreen: boolean; detectPaste: boolean; recordPlayback: boolean } } };
+  assessment: {
+    title: string; description: string; durationMin: number; status: string; questionCount: number; totalPoints: number;
+    breakdown: { coding: number; sql: number; mcq: number }; usesPools: boolean;
+    settings: { languages: string[]; proctoring: ProctoringSettings; retentionDays: number };
+  };
+  identity: { selfie: boolean; document: boolean };
   questions?: TQ[];
 }
 interface Ev { type: string; questionId?: number | null; detail?: Record<string, unknown>; t: number }
@@ -24,6 +32,9 @@ function Intro({ data, token, onStarted }: { data: TakeData; token: string; onSt
   const [err, setErr] = useState<string | null>(null);
   const a = data.assessment;
   const p = a.settings.proctoring;
+  const needsCheck = p.webcam || p.identityCheck || p.detectMultiMonitor;
+  const [checked, setChecked] = useState(!(p.webcam || p.identityCheck));
+  const onReady = useCallback((ok: boolean) => setChecked(ok || !(p.webcam || p.identityCheck)), [p.webcam, p.identityCheck]);
   const start = async () => {
     setBusy(true);
     setErr(null);
@@ -57,15 +68,33 @@ function Intro({ data, token, onStarted }: { data: TakeData; token: string; onSt
           {p.trackTabs && <li>When you switch away from this tab or window.</li>}
           {p.detectPaste && <li>When you paste into the editor, and how many characters.</li>}
           {p.requireFullscreen && <li>When you leave fullscreen mode.</li>}
+          {p.webcam && <li><b>Webcam snapshots</b> about every {p.webcamIntervalSec} seconds, plus when you are out of view or someone else appears. Faces are detected on your device; video is never streamed or uploaded.</li>}
+          {p.identityCheck && <li>A <b>selfie and a photo of your ID</b>, taken before you start.</li>}
+          {p.blockExternalPaste && <li>Pasting text from outside the test is <b>blocked</b>; attempts are recorded. Copy and paste within your own code works normally.</li>}
+          {p.blockCopy && <li>Copying the question text is blocked.</li>}
+          {p.detectMultiMonitor && <li>Whether a second display is connected.</li>}
+          <li>Your IP address and a fingerprint of your browser and device{p.singleDevice ? ' — the test locks to the first browser you start it in' : ''}.</li>
           <li>Your code is compared with other submissions for similarity.</li>
         </ul>
-        <p className="mt-2 text-xs text-ink-500">No camera, microphone or screen recording is used.</p>
+        <p className="mt-2 text-xs text-ink-500">
+          {p.webcam || p.identityCheck
+            ? `No audio or screen recording is used. Images and device data are kept for ${a.settings.retentionDays} days after you submit, then deleted.`
+            : 'No camera, microphone or screen recording is used.'}
+        </p>
+        {a.usesPools && <p className="mt-2 text-xs text-ink-400">Questions are drawn from pools, so other candidates may get different questions of the same difficulty.</p>}
       </Card>
+      {needsCheck && (
+        <Card className="mt-6 p-5">
+          <h2 className="mb-4 flex items-center gap-2 font-semibold text-ink-100"><ShieldCheck className="size-5 text-ember-400" /> System check</h2>
+          <SystemCheck token={token} settings={p} initial={data.identity} onReady={onReady} />
+        </Card>
+      )}
       <div className="mt-6 space-y-4">
         <div><Label>Your full name</Label><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="As you'd like the hiring team to see it" /></div>
         <label className="flex items-start gap-2 text-sm text-ink-300"><input type="checkbox" checked={agree} onChange={(e) => setAgree(e.target.checked)} className="mt-1 accent-ember-500" /> I understand what is recorded and will complete this test on my own.</label>
         <ErrorBox error={err} />
-        <Button variant="primary" size="lg" onClick={start} loading={busy} disabled={!name.trim() || !agree || a.status !== 'active'}>Start the test</Button>
+        <Button variant="primary" size="lg" onClick={start} loading={busy} disabled={!name.trim() || !agree || !checked || a.status !== 'active'}>Start the test</Button>
+        {!checked && <p className="text-sm text-ink-400">Complete the system check above to start.</p>}
         {a.status !== 'active' && <p className="text-sm text-amber-300">This assessment isn’t accepting candidates right now.</p>}
       </div>
     </div>
@@ -86,7 +115,7 @@ function Done({ data }: { data: TakeData }) {
   );
 }
 
-function Mcq({ q, onAnswer }: { q: TQ; onAnswer: (choice: string | string[]) => void }) {
+function Mcq({ q, onAnswer, blockCopy, onBlockedCopy }: { q: TQ; onAnswer: (choice: string | string[]) => void; blockCopy?: boolean; onBlockedCopy?: () => void }) {
   const initial = q.answer?.choice;
   const [choice, setChoice] = useState<string[]>(Array.isArray(initial) ? initial : initial ? [initial] : []);
   const toggle = (id: string) => {
@@ -95,7 +124,11 @@ function Mcq({ q, onAnswer }: { q: TQ; onAnswer: (choice: string | string[]) => 
     onAnswer(q.multiple ? next : next[0]);
   };
   return (
-    <div className="mx-auto max-w-2xl px-6 py-8">
+    <div
+      className={cx('mx-auto max-w-2xl px-6 py-8', blockCopy && 'select-none')}
+      onCopy={blockCopy ? (e) => { e.preventDefault(); onBlockedCopy?.(); } : undefined}
+      onContextMenu={blockCopy ? (e) => e.preventDefault() : undefined}
+    >
       <div className="mb-1 flex items-center gap-3"><h2 className="text-xl font-semibold text-ink-100">{q.title}</h2><Difficulty d={q.difficulty} /><span className="text-xs text-ink-400">{q.points} points</span></div>
       <div className="mt-3"><Markdown>{q.statement}</Markdown></div>
       {q.multiple && <p className="mt-2 text-xs text-ink-400">Select all that apply.</p>}
@@ -123,6 +156,9 @@ function Test({ data, token, onSubmitted }: { data: TakeData; token: string; onS
   const [confirming, setConfirming] = useState(false);
   const [fsWarn, setFsWarn] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+  const [multiMonitor, setMultiMonitor] = useState(false);
+  const [dupTab, setDupTab] = useState<'none' | 'elsewhere' | 'blocked'>('none');
   const answers = useRef(new Map<number, { language: string | null; code: string | null }>(qs.map((q) => [q.id, { language: q.answer?.language ?? null, code: q.answer?.code ?? null }])));
   const queue = useRef<Ev[]>([]);
   const pending = useRef(new Map<number, ReturnType<typeof setTimeout>>());
@@ -143,7 +179,11 @@ function Test({ data, token, onSubmitted }: { data: TakeData; token: string; onS
     const a = answers.current.get(qid);
     if (!a) return;
     try { const r = await api.put<{ savedAt: number }>(`/api/take/${token}/answers/${qid}`, { language: a.language, code: a.code ?? '' }); setSavedAt(r.savedAt); setErr(null); }
-    catch (e: any) { if (e.status === 410) onSubmitted(); else setErr('Could not save — check your connection. We will keep retrying.'); }
+    catch (e: any) {
+      if (e.status === 410) onSubmitted();
+      else if (e.status === 423) setErr(e.message);
+      else setErr('Could not save — check your connection. We will keep retrying.');
+    }
   }, [token, onSubmitted]);
 
   const finish = useCallback(async () => {
@@ -152,6 +192,7 @@ function Test({ data, token, onSubmitted }: { data: TakeData; token: string; onS
     await flush();
     try { await api.post(`/api/take/${token}/submit`); } catch { /* already submitted or timed out */ }
     if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    stopCamera();
     onSubmitted();
   }, [flush, saveCode, token, onSubmitted]);
 
@@ -178,12 +219,66 @@ function Test({ data, token, onSubmitted }: { data: TakeData; token: string; onS
     document.addEventListener('fullscreenchange', fs);
     if (p.requireFullscreen && !document.fullscreenElement) setFsWarn(true);
     const id = setInterval(flush, 5000);
-    const unload = () => { if (queue.current.length) navigator.sendBeacon?.(`/api/take/${token}/events`, new Blob([JSON.stringify({ events: queue.current })], { type: 'application/json' })); };
+    // keepalive fetch (not sendBeacon) so the device headers are sent too.
+    const unload = () => {
+      if (!queue.current.length) return;
+      void fetch(`/api/take/${token}/events`, {
+        method: 'POST', keepalive: true, credentials: 'same-origin',
+        headers: { ...getExtraHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ events: queue.current.splice(0, 200) }),
+      }).catch(() => {});
+    };
     window.addEventListener('beforeunload', unload);
     return () => { document.removeEventListener('visibilitychange', vis); document.removeEventListener('fullscreenchange', fs); clearInterval(id); window.removeEventListener('beforeunload', unload); };
   }, [p.trackTabs, p.requireFullscreen, log, flush, token]);
 
   useEffect(() => { log('question_view', {}, q.id); }, [q.id, log]);
+
+  const notify = useCallback((msg: string) => {
+    setToast(msg);
+    setTimeout(() => setToast((t) => (t === msg ? null : t)), 3500);
+  }, []);
+  const onBlockedPaste = useCallback(() => {
+    log('paste_blocked', {}, q.id);
+    notify('Pasting from outside the test is disabled for this assessment.');
+  }, [log, notify, q.id]);
+  const onBlockedCopy = useCallback(() => {
+    log('copy_blocked', {}, q.id);
+    notify('Copying question text is disabled for this assessment.');
+  }, [log, notify, q.id]);
+
+  // Second display (Chromium exposes screen.isExtended without a permission prompt).
+  useEffect(() => {
+    if (!p.detectMultiMonitor) return;
+    const s = screen as any;
+    const check = () => {
+      const ext = screenIsExtended() === true;
+      setMultiMonitor(ext);
+      if (ext) log('multi_monitor', { screens: 'extended' });
+    };
+    check();
+    s.addEventListener?.('change', check);
+    return () => s.removeEventListener?.('change', check);
+  }, [p.detectMultiMonitor, log]);
+
+  // The same test open in two tabs of this browser.
+  useEffect(() => {
+    if (typeof BroadcastChannel === 'undefined') return;
+    const me = Math.random().toString(36).slice(2);
+    const ch = new BroadcastChannel(`crucible-test-${token}`);
+    ch.onmessage = (e) => {
+      if (e.data?.from === me) return;
+      if (e.data?.type === 'hello') {
+        ch.postMessage({ type: 'here', from: me });
+        setDupTab('elsewhere');
+      } else if (e.data?.type === 'here') {
+        setDupTab('blocked');
+        log('duplicate_tab');
+      }
+    };
+    ch.postMessage({ type: 'hello', from: me });
+    return () => ch.close();
+  }, [token, log]);
 
   const onCodeChange = useCallback((qid: number) => (language: string, code: string) => {
     const prev = answers.current.get(qid);
@@ -216,6 +311,8 @@ function Test({ data, token, onSubmitted }: { data: TakeData; token: string; onS
         <Button variant="primary" size="sm" onClick={() => setConfirming(true)}><Send className="size-3.5" /> Finish</Button>
       </header>
       {err && <div className="bg-amber-500/10 px-4 py-1.5 text-center text-xs text-amber-200">{err}</div>}
+      {multiMonitor && <div className="flex items-center justify-center gap-2 bg-amber-500/10 px-4 py-1.5 text-xs text-amber-200"><MonitorSmartphone className="size-3.5" /> A second display is connected. Please disconnect it — this is recorded.</div>}
+      {dupTab === 'elsewhere' && <div className="flex items-center justify-center gap-2 bg-amber-500/10 px-4 py-1.5 text-xs text-amber-200"><Copy className="size-3.5" /> This test was opened in another tab. Keep working here and close the other tab.</div>}
       {fsWarn && (
         <div className="flex items-center justify-center gap-3 bg-amber-500/10 px-4 py-1.5 text-xs text-amber-200">
           <AlertTriangle className="size-3.5" /> This test asks you to stay in fullscreen.
@@ -223,7 +320,7 @@ function Test({ data, token, onSubmitted }: { data: TakeData; token: string; onS
         </div>
       )}
       <div className="min-h-0 flex-1 overflow-auto">
-        {q.type === 'mcq' ? <Mcq key={q.id} q={q} onAnswer={answerMcq} /> : (
+        {q.type === 'mcq' ? <Mcq key={q.id} q={q} onAnswer={answerMcq} blockCopy={p.blockCopy} onBlockedCopy={onBlockedCopy} /> : (
           <Workspace
             key={q.id}
             problem={q}
@@ -233,10 +330,25 @@ function Test({ data, token, onSubmitted }: { data: TakeData; token: string; onS
             onChange={changeHandlers.get(q.id)}
             onPaste={p.detectPaste ? (chars) => log('paste', { chars }, q.id) : undefined}
             onCopy={p.detectPaste ? () => log('copy', {}, q.id) : undefined}
+            blockExternalPaste={p.blockExternalPaste}
+            onBlockedPaste={onBlockedPaste}
+            blockCopy={p.blockCopy}
+            onBlockedCopy={onBlockedCopy}
             headerExtra={<span className="text-xs text-ink-400">{q.points} points</span>}
           />
         )}
       </div>
+      {p.webcam && <WebcamMonitor token={token} intervalSec={p.webcamIntervalSec} onEvent={(type, detail) => { log(type, detail); void flush(); }} />}
+      {toast && <div role="status" className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-lg border border-amber-500/30 bg-ink-900 px-4 py-2 text-sm text-amber-200 shadow-xl">{toast}</div>}
+      {dupTab === 'blocked' && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-ink-950/90 px-4" role="alertdialog" aria-modal="true">
+          <Card className="max-w-md p-6 text-center">
+            <Copy className="mx-auto size-9 text-amber-400" />
+            <h2 className="mt-3 text-lg font-semibold text-ink-100">This test is already open in another tab</h2>
+            <p className="mt-2 text-sm text-ink-300">Please continue in the other tab and close this one. Opening the test twice is recorded.</p>
+          </Card>
+        </div>
+      )}
       {confirming && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-ink-950/80 px-4" role="dialog" aria-modal="true" aria-labelledby="finish-title">
           <Card className="w-full max-w-md p-6">
@@ -257,8 +369,20 @@ export function TakeTest() {
   const { token = '' } = useParams();
   const [data, setData] = useState<TakeData | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [ready, setReady] = useState(false);
+  // Every request from the test carries this browser's id and fingerprint (device lock, shared-device checks).
+  useEffect(() => {
+    let alive = true;
+    const base = { 'x-crucible-device': deviceId() };
+    setExtraHeaders(base);
+    deviceFingerprint()
+      .then((fp) => { if (alive) setExtraHeaders({ ...base, 'x-crucible-fp': fp }); })
+      .catch(() => {})
+      .finally(() => { if (alive) setReady(true); });
+    return () => { alive = false; setExtraHeaders({}); };
+  }, []);
   const load = useCallback(() => api.get<TakeData>(`/api/take/${token}`).then(setData).catch((e) => setErr(e.message)), [token]);
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => { if (ready) void load(); }, [load, ready]);
   if (err) return <div className="mx-auto max-w-md px-4 py-24"><Logo className="mb-6" /><ErrorBox error={err} /></div>;
   if (!data) return <PageLoader />;
   if (data.attempt.status === 'invited') return <Intro data={data} token={token} onStarted={load} />;

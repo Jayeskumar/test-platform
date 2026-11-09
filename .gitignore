@@ -9,3 +9,4 @@ server/sandbox/runner
 test-results/
 playwright-report/
 scratch/
+web/public/mediapipe/wasm/

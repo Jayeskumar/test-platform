@@ -149,7 +149,40 @@ export async function seedIfEmpty(log = console.log, opts: { demo?: boolean } = 
       db.run('UPDATE attempts SET submitted_at = ? WHERE id = ?', start + c.submitMin * 60_000, inv.id);
     }),
   );
+  // A second demo: webcam + identity proctoring, lockdown and question pools.
+  const proctoredId = createAssessment(
+    {
+      title: 'Proctored Screening — Webcam & Question Pools',
+      description:
+        'Demonstrates proctoring: your webcam takes a snapshot about every 30 seconds (faces are detected on your device), ' +
+        'you take a selfie and a photo of your ID before starting, and pasting from outside the test is blocked. ' +
+        'Each candidate draws different questions from pools of equal difficulty.',
+      durationMin: 45,
+      status: 'active',
+      settings: {
+        proctoring: {
+          trackTabs: true, detectPaste: true, recordPlayback: true, requireFullscreen: false,
+          webcam: true, webcamIntervalSec: 30, identityCheck: true, blockExternalPaste: true, blockCopy: true,
+          detectMultiMonitor: true, singleDevice: true,
+        },
+        pools: { algorithms: { draw: 1 }, concepts: { draw: 2 } },
+        retentionDays: 30,
+      },
+      questions: [
+        { questionId: qid['balanced-brackets'], points: 100, pool: 'algorithms' },
+        { questionId: qid['count-islands'], points: 100, pool: 'algorithms' },
+        { questionId: qid['customers-without-orders'], points: 80 },
+        { questionId: qid['closure-in-loop'], points: 20, pool: 'concepts' },
+        { questionId: qid['mutable-default-argument'], points: 20, pool: 'concepts' },
+        { questionId: qid['stable-sort'], points: 20, pool: 'concepts' },
+        { questionId: qid['binary-search-complexity'], points: 20, pool: 'concepts' },
+      ],
+    },
+    recruiter,
+  );
+  const [demoInvite] = inviteCandidates(proctoredId, [{ email: 'try-me@example.com', name: '' }]);
   log(`[seed] demo assessment judged (${Date.now() - t0} ms total)`);
+  log(`[seed] proctored demo test: /t/${demoInvite.token}`);
   log('[seed] demo accounts (password: crucible123):');
   for (const a of DEMO_ACCOUNTS) log(`[seed]   ${a.role.padEnd(10)} ${a.email}`);
   return true;

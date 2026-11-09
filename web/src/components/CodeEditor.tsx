@@ -9,6 +9,7 @@ import { oneDark } from '@codemirror/theme-one-dark';
 import { EditorView } from '@codemirror/view';
 import CodeMirror from '@uiw/react-codemirror';
 import { useMemo } from 'react';
+import { isInternalText, rememberInternalCopy } from '../lib/proctor';
 
 const LANGS: Record<string, () => any> = {
   python: () => python(),
@@ -29,7 +30,7 @@ const theme = EditorView.theme({
 });
 
 export function CodeEditor({
-  value, onChange, language, readOnly, onPaste, onCopy, minHeight,
+  value, onChange, language, readOnly, onPaste, onCopy, minHeight, blockExternalPaste, onBlockedPaste,
 }: {
   value: string;
   onChange?: (v: string) => void;
@@ -38,19 +39,45 @@ export function CodeEditor({
   onPaste?: (chars: number) => void;
   onCopy?: () => void;
   minHeight?: string;
+  /** Only allow pasting/dropping text that was copied inside the test. */
+  blockExternalPaste?: boolean;
+  onBlockedPaste?: () => void;
 }) {
   const extensions = useMemo(() => {
     const ext = [theme, EditorView.lineWrapping];
     const lang = LANGS[language];
     if (lang) ext.push(lang());
-    if (onPaste || onCopy) {
+    if (onPaste || onCopy || blockExternalPaste) {
+      const remember = (view: EditorView) => {
+        const sel = view.state.selection.main;
+        rememberInternalCopy(view.state.sliceDoc(sel.from, sel.to));
+      };
       ext.push(EditorView.domEventHandlers({
-        paste: (e) => { onPaste?.(e.clipboardData?.getData('text')?.length ?? 0); return false; },
-        copy: () => { onCopy?.(); return false; },
+        paste: (e) => {
+          const text = e.clipboardData?.getData('text') ?? '';
+          if (blockExternalPaste && text && !isInternalText(text)) {
+            e.preventDefault();
+            onBlockedPaste?.();
+            return true;
+          }
+          onPaste?.(text.length);
+          return false;
+        },
+        drop: (e) => {
+          const text = e.dataTransfer?.getData('text/plain') ?? '';
+          if (blockExternalPaste && text && !isInternalText(text)) {
+            e.preventDefault();
+            onBlockedPaste?.();
+            return true;
+          }
+          return false;
+        },
+        copy: (_e, view) => { remember(view); onCopy?.(); return false; },
+        cut: (_e, view) => { remember(view); return false; },
       }));
     }
     return ext;
-  }, [language, onPaste, onCopy]);
+  }, [language, onPaste, onCopy, blockExternalPaste, onBlockedPaste]);
   return (
     <CodeMirror
       value={value}

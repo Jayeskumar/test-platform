@@ -11,7 +11,12 @@
 | **Question types** | Coding (exact, token, float-tolerance, any-order or custom Python checkers), **SQL** (judged against several hidden datasets) and multiple choice. |
 | **Assessments** | Timed tests with private invite links, autosave, automatic submission at the deadline, and automatic judging of code that was written but never submitted. |
 | **Code playback** | Scrub through how each answer was written. Sudden insertions and pastes are marked on the timeline. |
-| **Plagiarism detection** | MOSS-style winnowing over normalized tokens, across candidates *and* against reference and known public solutions. Renaming variables doesn't hide a copy. |
+| **Plagiarism detection** | MOSS-style winnowing over normalized tokens, across candidates *and* against reference and known public solutions. Renaming variables doesn't hide a copy, and shared starter code is excluded (a "base file"). |
+| **Webcam proctoring** *(opt-in)* | A snapshot at the start and about every N seconds, with jittered timing. Faces are detected **in the candidate's browser** (MediaPipe BlazeFace, served by Crucible); evidence is captured when nobody, or more than one person, is in view. If the camera disconnects, the test is blocked until it's reconnected. |
+| **Identity check** *(opt-in)* | A selfie and a photo ID before the test, shown next to the snapshots in the report. |
+| **Lockdown** *(opt-in)* | Block pasting from outside the test (copy/paste within the candidate's own code still works), block copying question text, lock the test to one browser, detect a second display or a duplicate tab. |
+| **Device & network checks** | Every test records the IP address, a browser id and a device fingerprint. Two candidates on the same browser or device are flagged; a shared network is shown as context only. |
+| **Question pools** | Each candidate draws a random, reproducible selection from pools of equal-value questions, so answers are harder to share. |
 | **Fair integrity scoring** | Tab switches, fullscreen exits and large pastes feed an integrity score. When two candidates match, authorship evidence (paste or burst versus steady typing) decides who is penalized. |
 | **AI review** *(optional)* | With `ANTHROPIC_API_KEY` set, Claude writes a structured review per attempt: correctness, efficiency, code quality, strengths, concerns and follow-up interview questions. |
 | **Practice mode** | Problem list with filters, submission history, points, global rank, streaks, an activity heatmap and a skill radar. |
@@ -69,6 +74,7 @@ The image installs every toolchain system-wide. Compose grants `SYS_ADMIN` and u
 | `JUDGE_WORKERS` | `min(4, CPUs)` | Concurrent sandbox slots, each with its own uid |
 | `SANDBOX_UID_BASE` | `61000` | First sandbox uid (slot *i* runs as `base + i`) |
 | `SANDBOX_HIDE` | — | Extra paths to hide from sandboxed programs (`:`-separated) |
+| `MEDIA_DIR` | `$DATA_DIR/media` | Proctoring images (files `0600`, never served without a staff session) |
 | `SEED_DEMO` | `1` in dev, `0` in prod | Install demo accounts (published password) and the demo assessment |
 | `ADMIN_EMAIL` / `ADMIN_PASSWORD` | — | First admin account, created on an empty database |
 | `ANTHROPIC_API_KEY` | — | Turns on AI review. Nothing is sent anywhere without it |
@@ -130,10 +136,28 @@ On the built-in data, copies score 1.00 and independently written solutions scor
 
 ---
 
+### Proctoring and cheating prevention (`server/src/proctor.ts`, `server/src/media.ts`, `web/src/components/proctor/`)
+
+Everything is configured per assessment, and the candidate's intro page lists exactly what that assessment collects.
+
+| Signal | How it's collected | Prevention | In the report |
+|---|---|---|---|
+| Webcam | JPEG snapshot at the start and about every 15–120 s (jittered); faces counted on-device; extra evidence shots when no face is seen for about 10 s or more than one face appears | Test blocked while the camera is disconnected | Snapshot gallery, flagged frames, "not on camera *n* of *m*" |
+| Identity | Selfie and ID photo before starting (camera or upload) | Required to start | Shown side by side with the snapshots |
+| Paste | Clipboard text is checked against what was copied *inside* the test | External pastes and drag-and-drop are blocked | Blocked attempts on the timeline |
+| Copying questions | Copy, cut and the context menu on the statement | Blocked | Attempts on the timeline |
+| Device | Per-browser id plus a SHA-256 device fingerprint, sent on every request | Optional lock to the first browser; staff can unlock | Devices table; other candidates seen on the same browser, device or network |
+| Displays and tabs | `screen.isExtended`; `BroadcastChannel` | Warning banner; the second tab is blocked | Timeline events |
+| Question sharing | Seeded per-candidate draw from each pool | Different candidates get different questions | The questions each candidate drew |
+
+**Image handling.** Uploads must be real JPEG or PNG files (magic bytes checked against the declared type), up to 450 KB each. Snapshots are limited to one per 8 seconds and identity photos to 5 per kind. Images are stored outside the web root (files `0600`, directories `0700`) and served only to staff who own the assessment. Images, ID photos and IP/device logs are deleted automatically after the assessment's retention period (7–365 days, default 90), and staff can delete them earlier from a report.
+
+**Limits, honestly.** The browser is the candidate's environment. A determined candidate can use a second device out of view of the camera, or a virtual camera. These signals raise the cost of cheating and give reviewers evidence; they don't make cheating impossible. Face detection counts faces, it doesn't recognize them: comparing the selfie, ID and snapshots is a human step. Second-display detection needs a Chromium-based browser. There is no audio monitoring or screen recording.
+
 ## Testing
 
 ```bash
-npm test            # 67 tests, about 2.5 minutes
+npm test            # 77 tests, about 2.5 minutes
 npm run typecheck
 ```
 
@@ -143,6 +167,9 @@ npm run typecheck
 | `judge.test.ts` | Accepted solutions in every available language; WA with weighted partial credit; CE, RE and TLE; custom input; custom checkers; full-length expected outputs; SQL (including blocked `ATTACH`); complexity, checker and plagiarism units |
 | `problems.test.ts` | Every built-in problem's reference solution passes, **and an independently written solution in another language agrees on all of its tests** |
 | `api.test.ts` | Auth; practice run and submit; **hidden tests never leak to candidates**; candidates can't reach staff APIs; recruiters can't see each other's candidates; tokens are scoped to attempts; the full assessment flow; deadline expiry; question validation |
+| `proctoring.test.ts` | Pool draws (count, determinism, variety, scoring, validation); media accepted only when enabled; forged or oversized images rejected; rate limits; identity required to start; image access control; device lock, unlock and refused-device logging; device-switch logging; shared browser vs shared network; lockdown signals; retention deletion |
+
+The webcam flow was also verified in Chromium with a fake camera fed a public-domain portrait (one face), two copies side by side (two faces) and a blank frame (no face).
 
 Isolation tests need root and are skipped automatically otherwise (CI runs unprivileged).
 

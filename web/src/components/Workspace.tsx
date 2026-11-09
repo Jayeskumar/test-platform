@@ -3,6 +3,7 @@ import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } fro
 import { useAuth } from '../lib/auth';
 import { cx, mem, ms } from '../lib/format';
 import type { Problem, Submission } from '../lib/types';
+import { isInternalText } from '../lib/proctor';
 import { useJudge } from '../lib/useJudge';
 import { CodeEditor } from './CodeEditor';
 import { Markdown } from './Markdown';
@@ -20,6 +21,11 @@ export interface WorkspaceProps {
   onChange?: (language: string, code: string) => void;
   onPaste?: (chars: number) => void;
   onCopy?: () => void;
+  /** Lockdown (proctored tests). */
+  blockExternalPaste?: boolean;
+  onBlockedPaste?: () => void;
+  blockCopy?: boolean;
+  onBlockedCopy?: () => void;
   onJudged?: (s: Submission) => void;
   storageKey?: string;
   headerExtra?: ReactNode;
@@ -111,7 +117,14 @@ export function Workspace(p: WorkspaceProps) {
   const tabs = [{ id: 'statement', label: 'Problem' }, ...(p.sideTabs ?? []).map((t) => ({ id: t.id, label: t.label }))];
   return (
     <div className="flex h-full min-h-0 flex-col lg:flex-row">
-      <section className="flex min-h-0 flex-col border-b border-ink-800 lg:basis-[var(--split)] lg:border-r lg:border-b-0" style={{ '--split': `${split}%` } as React.CSSProperties} aria-label="Problem statement">
+      <section
+        className={cx('flex min-h-0 flex-col border-b border-ink-800 lg:basis-[var(--split)] lg:border-r lg:border-b-0', p.blockCopy && 'select-none')}
+        style={{ '--split': `${split}%` } as React.CSSProperties}
+        aria-label="Problem statement"
+        onCopy={p.blockCopy ? (e) => { e.preventDefault(); p.onBlockedCopy?.(); } : undefined}
+        onCut={p.blockCopy ? (e) => { e.preventDefault(); p.onBlockedCopy?.(); } : undefined}
+        onContextMenu={p.blockCopy ? (e) => e.preventDefault() : undefined}
+      >
         <div className="flex items-center gap-2 border-b border-ink-800 px-3 py-2">
           <Tabs tabs={tabs} value={leftTab} onChange={setLeftTab} />
           <div className="ml-auto">{p.headerExtra}</div>
@@ -176,12 +189,13 @@ export function Workspace(p: WorkspaceProps) {
           </div>
         </div>
         <div className="min-h-[240px] flex-1 overflow-hidden">
-          <CodeEditor value={code} onChange={onEdit} language={language} onPaste={p.onPaste} onCopy={p.onCopy} />
+          <CodeEditor value={code} onChange={onEdit} language={language} onPaste={p.onPaste} onCopy={p.onCopy} blockExternalPaste={p.blockExternalPaste} onBlockedPaste={p.onBlockedPaste} />
         </div>
         {customOn && !isSql && (
           <div className="border-t border-ink-800 px-3 py-2">
             <div className="mb-1 flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-ink-400"><Lightbulb className="size-3" /> Custom input (runs alongside the samples)</div>
-            <textarea value={custom} onChange={(e) => setCustom(e.target.value)} rows={3} className="w-full resize-y rounded-md border border-ink-700 bg-ink-950 px-2 py-1.5 font-mono text-xs text-ink-100 focus:border-ember-500/60 focus:outline-none" aria-label="Custom input" />
+            <textarea value={custom} onChange={(e) => setCustom(e.target.value)} rows={3}
+              onPaste={p.blockExternalPaste ? (e) => { const t = e.clipboardData.getData('text'); if (t && !isInternalText(t)) { e.preventDefault(); p.onBlockedPaste?.(); } } : undefined} className="w-full resize-y rounded-md border border-ink-700 bg-ink-950 px-2 py-1.5 font-mono text-xs text-ink-100 focus:border-ember-500/60 focus:outline-none" aria-label="Custom input" />
           </div>
         )}
         <div onPointerDown={startConsole} className="hidden h-1 cursor-row-resize bg-ink-900 hover:bg-ember-500/40 lg:block" role="separator" aria-orientation="horizontal" aria-label="Resize console" />

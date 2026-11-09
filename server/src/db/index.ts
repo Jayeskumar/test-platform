@@ -146,6 +146,59 @@ CREATE TABLE IF NOT EXISTS events (
 CREATE INDEX IF NOT EXISTS idx_events ON events(attempt_id, t);
 `;
 
+/**
+ * Forward-only migrations, tracked with PRAGMA user_version. The base SCHEMA above
+ * is version 0; each entry upgrades the database by one version.
+ */
+const MIGRATIONS: string[] = [
+  // 1 — proctoring: question pools, per-attempt draws, device binding, media, access log
+  `
+  ALTER TABLE assessment_questions ADD COLUMN pool TEXT;
+  ALTER TABLE attempts ADD COLUMN question_ids TEXT;
+  ALTER TABLE attempts ADD COLUMN device_id TEXT;
+  CREATE TABLE IF NOT EXISTS media (
+    id INTEGER PRIMARY KEY,
+    attempt_id INTEGER NOT NULL REFERENCES attempts(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL CHECK (kind IN ('snapshot','identity_selfie','identity_document')),
+    t INTEGER NOT NULL,
+    faces INTEGER,
+    reason TEXT NOT NULL DEFAULT 'periodic',
+    file TEXT NOT NULL,
+    mime TEXT NOT NULL,
+    bytes INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_media_attempt ON media(attempt_id, t);
+  CREATE TABLE IF NOT EXISTS access_log (
+    id INTEGER PRIMARY KEY,
+    attempt_id INTEGER NOT NULL REFERENCES attempts(id) ON DELETE CASCADE,
+    t INTEGER NOT NULL,
+    ip TEXT,
+    user_agent TEXT,
+    fingerprint TEXT,
+    device_id TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_access_attempt ON access_log(attempt_id, t);
+  CREATE INDEX IF NOT EXISTS idx_access_fp ON access_log(fingerprint);
+  CREATE INDEX IF NOT EXISTS idx_access_device ON access_log(device_id);
+  CREATE INDEX IF NOT EXISTS idx_access_ip ON access_log(ip);
+  `,
+];
+
+function migrate(db: DatabaseSync) {
+  const version = Number((db.prepare('PRAGMA user_version').get() as any).user_version);
+  for (let v = version; v < MIGRATIONS.length; v++) {
+    db.exec('BEGIN');
+    try {
+      db.exec(MIGRATIONS[v]);
+      db.exec(`PRAGMA user_version = ${v + 1}`);
+      db.exec('COMMIT');
+    } catch (e) {
+      db.exec('ROLLBACK');
+      throw new Error(`Database migration ${v + 1} failed: ${(e as Error).message}`);
+    }
+  }
+}
+
 export type Row = Record<string, SQLInputValue>;
 
 export class Db {
@@ -156,6 +209,7 @@ export class Db {
     }
     this.raw = new DatabaseSync(file);
     this.raw.exec(SCHEMA);
+    migrate(this.raw);
     if (file !== ':memory:') {
       // Hidden test cases live here: never readable by sandbox uids.
       try { fs.chmodSync(file, 0o600); fs.chmodSync(path.dirname(file), 0o700); } catch { /* best effort */ }

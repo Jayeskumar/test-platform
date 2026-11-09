@@ -27,7 +27,7 @@ At the same time, candidates distrust opaque proctoring, and practice platforms 
 | Test feedback | Shown once the whole run finishes | Each test case streams in live, with CPU time and memory |
 | Efficiency | Implicit in time limits | **Measured growth curve** and Big-O estimate against a target |
 | Plagiarism | Pairwise similarity score | Winnowing plus comparison with reference solutions **plus authorship evidence** (paste or burst versus typed) |
-| Proctoring | Often camera-based and opaque | Lightweight signals, shown to the candidate before they start, folded into an explained integrity score |
+| Proctoring | Often camera-based and opaque | Opt-in webcam snapshots with **on-device** face detection, identity check, lockdown and device/network checks — all listed to the candidate before they start, each with its own retention period |
 | Code history | Final submission | **Playback** of the whole writing process |
 | SQL | Usually one dataset | Several hidden datasets, row-order aware, sandboxed |
 | Authoring | Hand-written expected outputs | Expected outputs computed from the reference solution; validation runs the reference against every test |
@@ -47,8 +47,9 @@ At the same time, candidates distrust opaque proctoring, and practice platforms 
 - Practice: problem list, IDE, run/submit, live results, history, dashboard, leaderboard
 - Assessments: builder, invite links, timed test-taking with autosave and auto-submit
 - Reports: score and percentile, integrity timeline, playback, per-test results, complexity, plagiarism, optional AI review
+- Proctoring (v0.2): webcam snapshots with on-device face detection, identity check, paste/copy lockdown, one-browser lock, second-display and duplicate-tab detection, device fingerprinting and shared-device detection, question pools, automatic retention
 - Question library and editor with validation
-- 67 automated tests, including security-boundary tests and cross-language verification of the problem set
+- 77 automated tests, including security-boundary tests, proctoring tests, and cross-language verification of the problem set
 
 ## Success metrics
 
@@ -65,6 +66,12 @@ At the same time, candidates distrust opaque proctoring, and practice platforms 
 - Live interview mode: a shared editor and judge with the interviewer watching
 - Contests with a live leaderboard (the SSE infrastructure already exists)
 - Question versioning, so editing a question never changes past results
+
+**Proctoring, next**
+- A second camera angle via a paired phone, showing the desk and screen
+- Optional screen-share snapshots, consent-gated like the webcam
+- Assisted face matching between selfie, ID and snapshots (reviewer-confirmed, never automatic rejection)
+- Reviewer workflow: mark flags as "explained" or "concern", with notes
 
 **Hardening**
 - A seccomp syscall allow-list in the sandbox supervisor; optional gVisor or Firecracker backend
