@@ -1,0 +1,16 @@
+{
+  "name": "crucible",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Crucible — an advanced technical assessment & coding practice platform",
+  "workspaces": ["server", "web"],
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "build": "npm run build -w web && npm run build -w server",
+    "start": "npm run start -w server",
+    "test": "npm test -w server",
+    "seed": "npm run seed -w server",
+    "typecheck": "npm run typecheck -w server && npm run typecheck -w web"
+  },
+  "engines": { "node": ">=22.13" }
+}

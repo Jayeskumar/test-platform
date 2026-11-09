@@ -1,0 +1,11 @@
+node_modules/
+dist/
+*.db
+*.db-*
+data/
+.DS_Store
+.env
+server/sandbox/runner
+test-results/
+playwright-report/
+scratch/
