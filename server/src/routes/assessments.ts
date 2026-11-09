@@ -57,18 +57,34 @@ const InviteBody = z.object({
   candidates: z.array(z.object({ email: z.string().trim().toLowerCase().email(), name: z.string().trim().max(80).default('') })).min(1).max(200),
 });
 
-function ownedAssessment(user: User, id: number) {
+export type Access = 'view' | 'edit' | 'own';
+
+/** The user's role on an assessment: owner (or admin), editor, reviewer — or null. */
+export function assessmentRole(user: User, a: { id: number; owner_id: number }): 'owner' | 'editor' | 'reviewer' | null {
+  if (user.role === 'admin' || a.owner_id === user.id) return 'owner';
+  const m = getDb().get<any>('SELECT role FROM assessment_members WHERE assessment_id = ? AND user_id = ?', a.id, user.id);
+  return m?.role ?? null;
+}
+
+const ALLOWED: Record<Access, string[]> = { view: ['owner', 'editor', 'reviewer'], edit: ['owner', 'editor'], own: ['owner'] };
+
+function ownedAssessment(user: User, id: number, need: Access = 'view') {
   const a = getDb().get<any>('SELECT * FROM assessments WHERE id = ?', id);
-  if (!a || (user.role !== 'admin' && a.owner_id !== user.id)) throw new HttpError(404, 'Assessment not found.');
+  const role = a ? assessmentRole(user, a) : null;
+  if (!a || !role) throw new HttpError(404, 'Assessment not found.');
+  if (!ALLOWED[need].includes(role)) throw new HttpError(403, need === 'own' ? 'Only the owner can manage the team.' : 'Reviewers can view and decide, but not change this assessment.');
   return a;
 }
 
-function ownedAttempt(user: User, id: number) {
+function ownedAttempt(user: User, id: number, need: Access = 'view') {
   const at = getDb().get<any>('SELECT * FROM attempts WHERE id = ?', id);
   if (!at) throw new HttpError(404, 'Attempt not found.');
-  ownedAssessment(user, at.assessment_id);
+  ownedAssessment(user, at.assessment_id, need);
   return at;
 }
+
+/** Stable id for an integrity flag (flags are generated text). */
+export const flagKey = (text: string) => crypto.createHash('sha1').update(text).digest('hex').slice(0, 16);
 
 export function createAssessment(body: unknown, ownerId: number): number {
   const b = AssessmentBody.parse(body);
@@ -130,14 +146,16 @@ export async function assessmentRoutes(app: FastifyInstance) {
         (SELECT COUNT(*) FROM attempts t WHERE t.assessment_id = a.id AND t.status != 'invited') AS started,
         (SELECT COUNT(*) FROM attempts t WHERE t.assessment_id = a.id AND t.status = 'submitted') AS completed,
         (SELECT AVG(t.score * 100.0 / NULLIF(t.max_score, 0)) FROM attempts t WHERE t.assessment_id = a.id AND t.status = 'submitted') AS avg_pct
-       FROM assessments a WHERE a.owner_id = ? OR ? = 'admin' ORDER BY a.created_at DESC`,
-      user.id, user.role,
+       FROM assessments a WHERE a.owner_id = ? OR ? = 'admin' OR EXISTS (SELECT 1 FROM assessment_members m WHERE m.assessment_id = a.id AND m.user_id = ?)
+       ORDER BY a.created_at DESC`,
+      user.id, user.role, user.id,
     );
     return {
       assessments: rows.map((r) => ({
         id: r.id, title: r.title, status: r.status, durationMin: r.duration_min, createdAt: r.created_at,
         questions: r.questions, invited: r.invited, started: r.started, completed: r.completed,
         avgPct: r.avg_pct == null ? null : Math.round(r.avg_pct),
+        role: assessmentRole(user, r),
       })),
     };
   });
@@ -146,14 +164,14 @@ export async function assessmentRoutes(app: FastifyInstance) {
   app.get('/api/hiring/overview', async (req) => {
     const user = requireStaff(req);
     const db = getDb();
-    const owned = `s.owner_id = ? OR ? = 'admin'`;
-    const one = (sql: string, ...p: any[]) => db.get<any>(sql, user.id, user.role, ...p).n as number;
+    const owned = `s.owner_id = ? OR ? = 'admin' OR EXISTS (SELECT 1 FROM assessment_members m WHERE m.assessment_id = s.id AND m.user_id = ?)`;
+    const one = (sql: string, ...p: any[]) => db.get<any>(sql, user.id, user.role, user.id, ...p).n as number;
     const weekAgo = now() - 7 * 86400_000;
     const recent = db.all<any>(
       `SELECT a.id, a.candidate_name, a.candidate_email, a.score, a.max_score, a.integrity, a.submitted_at, a.decision, s.id AS assessment_id, s.title
        FROM attempts a JOIN assessments s ON s.id = a.assessment_id
        WHERE (${owned}) AND a.status = 'submitted' AND a.decision IS NULL ORDER BY a.submitted_at DESC LIMIT 8`,
-      user.id, user.role,
+      user.id, user.role, user.id,
     );
     return {
       stats: {
@@ -163,7 +181,7 @@ export async function assessmentRoutes(app: FastifyInstance) {
         awaitingReview: one(`SELECT COUNT(*) AS n FROM attempts a JOIN assessments s ON s.id = a.assessment_id WHERE (${owned}) AND a.status = 'submitted' AND a.decision IS NULL`),
         flagged: db.all<any>(
           `SELECT a.integrity FROM attempts a JOIN assessments s ON s.id = a.assessment_id WHERE (${owned}) AND a.status = 'submitted' AND a.decision IS NULL`,
-          user.id, user.role,
+          user.id, user.role, user.id,
         ).filter((r) => (parseJson<any>(r.integrity, null)?.level ?? 'high') !== 'high').length,
       },
       awaitingReview: recent.map((r) => {
@@ -210,6 +228,61 @@ export async function assessmentRoutes(app: FastifyInstance) {
       };
     });
     return { assessment: { id: asmt.id, title: asmt.title, durationMin: asmt.duration_min }, questions: qs, candidates };
+  });
+
+  /** The people who can see an assessment. */
+  app.get('/api/assessments/:id/members', async (req) => {
+    const user = requireStaff(req);
+    const a = ownedAssessment(user, Number((req.params as any).id));
+    const db = getDb();
+    const owner = db.get<any>('SELECT id, name, email FROM users WHERE id = ?', a.owner_id);
+    const members = db.all<any>('SELECT u.id, u.name, u.email, m.role, m.added_at FROM assessment_members m JOIN users u ON u.id = m.user_id WHERE m.assessment_id = ? ORDER BY m.added_at', a.id);
+    return { owner, members, you: assessmentRole(user, a) };
+  });
+
+  app.post('/api/assessments/:id/members', async (req) => {
+    const user = requireStaff(req);
+    const a = ownedAssessment(user, Number((req.params as any).id), 'own');
+    const body = z.object({ email: z.string().trim().toLowerCase().email(), role: z.enum(['reviewer', 'editor']) }).parse(req.body);
+    const db = getDb();
+    const target = db.get<any>('SELECT id, name, email, role FROM users WHERE email = ?', body.email);
+    if (!target) throw new HttpError(404, 'No account with that email — ask them to sign up as a hiring team member first.');
+    if (target.role === 'candidate') throw new HttpError(400, 'Candidates cannot join a hiring team.');
+    if (target.id === a.owner_id) throw new HttpError(400, 'That person already owns this assessment.');
+    db.run(
+      `INSERT INTO assessment_members (assessment_id, user_id, role, added_at) VALUES (?, ?, ?, ?)
+       ON CONFLICT(assessment_id, user_id) DO UPDATE SET role = excluded.role`,
+      a.id, target.id, body.role, now(),
+    );
+    return { ok: true, member: { id: target.id, name: target.name, email: target.email, role: body.role } };
+  });
+
+  app.delete('/api/assessments/:id/members/:userId', async (req) => {
+    const user = requireStaff(req);
+    const a = ownedAssessment(user, Number((req.params as any).id), 'own');
+    getDb().run('DELETE FROM assessment_members WHERE assessment_id = ? AND user_id = ?', a.id, Number((req.params as any).userId));
+    return { ok: true };
+  });
+
+  /** Mark one integrity flag as explained or a concern (null clears it). */
+  app.put('/api/attempts/:id/flags', async (req) => {
+    const user = requireStaff(req);
+    const at = ownedAttempt(user, Number((req.params as any).id));
+    const body = z.object({
+      key: z.string().regex(/^[0-9a-f]{16}$/),
+      status: z.enum(['explained', 'concern']).nullable(),
+      note: z.string().max(2000).default(''),
+    }).parse(req.body);
+    const db = getDb();
+    if (!body.status) db.run('DELETE FROM flag_reviews WHERE attempt_id = ? AND flag_key = ?', at.id, body.key);
+    else {
+      db.run(
+        `INSERT INTO flag_reviews (attempt_id, flag_key, status, note, reviewer, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(attempt_id, flag_key) DO UPDATE SET status = excluded.status, note = excluded.note, reviewer = excluded.reviewer, updated_at = excluded.updated_at`,
+        at.id, body.key, body.status, body.note, user.name, now(),
+      );
+    }
+    return { ok: true };
   });
 
   /** Reviewer decision and notes for an attempt. */
@@ -260,7 +333,7 @@ export async function assessmentRoutes(app: FastifyInstance) {
     return {
       assessment: {
         id: a.id, title: a.title, description: a.description, durationMin: a.duration_min, status: a.status,
-        settings: assessmentSettings(a.settings), createdAt: a.created_at,
+        settings: assessmentSettings(a.settings), createdAt: a.created_at, role: assessmentRole(user, a),
       },
       questions,
       perQuestion,
@@ -270,7 +343,7 @@ export async function assessmentRoutes(app: FastifyInstance) {
 
   app.put('/api/assessments/:id', async (req) => {
     const user = requireStaff(req);
-    const a = ownedAssessment(user, Number((req.params as any).id));
+    const a = ownedAssessment(user, Number((req.params as any).id), 'edit');
     const b = AssessmentBody.parse(req.body);
     const db = getDb();
     const started = db.get<any>("SELECT COUNT(*) AS n FROM attempts WHERE assessment_id = ? AND status != 'invited'", a.id).n;
@@ -296,14 +369,14 @@ export async function assessmentRoutes(app: FastifyInstance) {
 
   app.post('/api/assessments/:id/invites', async (req) => {
     const user = requireStaff(req);
-    const a = ownedAssessment(user, Number((req.params as any).id));
+    const a = ownedAssessment(user, Number((req.params as any).id), 'edit');
     const { candidates } = InviteBody.parse(req.body);
     return { invites: inviteCandidates(a.id, candidates) };
   });
 
   app.delete('/api/attempts/:id', async (req) => {
     const user = requireStaff(req);
-    const at = ownedAttempt(user, Number((req.params as any).id));
+    const at = ownedAttempt(user, Number((req.params as any).id), 'edit');
     if (at.status !== 'invited') throw new HttpError(409, 'Only unused invitations can be revoked.');
     deleteProctoringData(at.id); // identity photos may exist before the test starts
     getDb().run('DELETE FROM attempts WHERE id = ?', at.id);
@@ -375,6 +448,10 @@ export async function assessmentRoutes(app: FastifyInstance) {
       },
       media,
       access,
+      role: assessmentRole(user, asmt),
+      flagReviews: Object.fromEntries(db.all<any>('SELECT flag_key, status, note, reviewer, updated_at FROM flag_reviews WHERE attempt_id = ?', at.id)
+        .map((f) => [f.flag_key, { status: f.status, note: f.note, reviewer: f.reviewer, updatedAt: f.updated_at }])),
+      flagKeys: (integrity?.flags ?? []).map(flagKey),
       questions,
       events,
       integrity,
@@ -397,7 +474,7 @@ export async function assessmentRoutes(app: FastifyInstance) {
   /** Delete webcam images, ID photos and IP/device logs for an attempt (e.g. on a data request). */
   app.delete('/api/attempts/:id/proctoring', async (req) => {
     const user = requireStaff(req);
-    const at = ownedAttempt(user, Number((req.params as any).id));
+    const at = ownedAttempt(user, Number((req.params as any).id), 'edit');
     deleteProctoringData(at.id);
     return { ok: true };
   });
@@ -405,7 +482,7 @@ export async function assessmentRoutes(app: FastifyInstance) {
   /** Let a candidate continue in a different browser (e.g. after a crash) when the device lock is on. */
   app.post('/api/attempts/:id/unlock-device', async (req) => {
     const user = requireStaff(req);
-    const at = ownedAttempt(user, Number((req.params as any).id));
+    const at = ownedAttempt(user, Number((req.params as any).id), 'edit');
     getDb().run('UPDATE attempts SET device_id = NULL WHERE id = ?', at.id);
     getDb().run('INSERT INTO events (attempt_id, type, detail, t) VALUES (?, ?, ?, ?)', at.id, 'device_unlocked', JSON.stringify({ by: user.email }), now());
     return { ok: true };

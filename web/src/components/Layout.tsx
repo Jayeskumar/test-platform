@@ -96,6 +96,7 @@ export function TopNav() {
   useEffect(() => setMobile(false), [loc.pathname]);
   const links = [
     { to: '/problems', label: 'Practice' },
+    { to: '/contests', label: 'Contests' },
     { to: '/leaderboard', label: 'Leaderboard' },
     ...(user ? [{ to: '/dashboard', label: 'Progress' }] : []),
     ...(isStaff(user) ? [{ to: '/hiring', label: 'Hiring' }, { to: '/library', label: 'Library' }] : []),

@@ -48,8 +48,8 @@ function Lightbox({ items, index, startedAt, onClose }: { items: MediaItem[]; in
   );
 }
 
-export function ProctoringPanel({ attemptId, media, startedAt, retentionDays, webcam, onDeleted }: {
-  attemptId: number; media: MediaItem[]; startedAt: number; retentionDays: number; webcam: boolean; onDeleted: () => void;
+export function ProctoringPanel({ attemptId, media, startedAt, retentionDays, webcam, onDeleted, canDelete = true }: {
+  attemptId: number; media: MediaItem[]; startedAt: number; retentionDays: number; webcam: boolean; onDeleted: () => void; canDelete?: boolean;
 }) {
   const [onlyFlagged, setOnlyFlagged] = useState(false);
   const [open, setOpen] = useState<number | null>(null);
@@ -68,7 +68,7 @@ export function ProctoringPanel({ attemptId, media, startedAt, retentionDays, we
         <Camera className="size-5 text-ember-400" />
         <h2 className="font-semibold text-ink-100">Proctoring</h2>
         <span className="text-xs text-ink-500">auto-deleted {retentionDays} days after submission</span>
-        {media.length > 0 && <Button size="sm" variant="ghost" className="ml-auto" onClick={del}><Trash2 className="size-3.5" /> Delete proctoring data</Button>}
+        {media.length > 0 && canDelete && <Button size="sm" variant="ghost" className="ml-auto" onClick={del}><Trash2 className="size-3.5" /> Delete proctoring data</Button>}
       </div>
       <ErrorBox error={err} />
       {!media.length && <p className="text-sm text-ink-400">{webcam ? 'No images were received for this attempt.' : 'No images on file.'}</p>}

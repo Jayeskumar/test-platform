@@ -246,3 +246,65 @@ describe('reviewer workflow', () => {
     assert.equal((await req('GET', `/api/assessments/${a}/compare?ids=${invs[0].id}`, undefined, 'ow')).status, 404);
   });
 });
+
+describe('team hiring', () => {
+  before(async () => {
+    await freshEnv();
+    app = await buildApp();
+  });
+  after(async () => { await app.close(); });
+
+  test('collaborator roles and flag reviews', async () => {
+    for (const [k, role] of [['owner', 'recruiter'], ['rev', 'recruiter'], ['ed', 'recruiter'], ['out', 'recruiter'], ['cand', 'candidate']] as const) {
+      await req('POST', '/api/auth/register', { email: `${k}@t.dev`, name: k.toUpperCase(), password: 'password1', role }, k);
+    }
+    const q = await createQuestion(MCQ_Q, null);
+    const a = (await req('POST', '/api/assessments', { title: 'Team', durationMin: 10, questions: [{ questionId: q, points: 10 }] }, 'owner')).body.id;
+    const [inv] = (await req('POST', `/api/assessments/${a}/invites`, { candidates: [{ email: 'c@t.dev' }] }, 'owner')).body.invites;
+    await req('POST', `/api/take/${inv.token}/start`, { name: 'Cand' });
+    await req('POST', `/api/take/${inv.token}/events`, { events: [{ type: 'tab_hidden' }, { type: 'tab_hidden' }, { type: 'tab_hidden' }] });
+    await req('POST', `/api/take/${inv.token}/submit`);
+
+    // Only the owner manages the team; candidates and unknown emails are refused.
+    assert.equal((await req('POST', `/api/assessments/${a}/members`, { email: 'rev@t.dev', role: 'reviewer' }, 'out')).status, 404);
+    assert.equal((await req('POST', `/api/assessments/${a}/members`, { email: 'cand@t.dev', role: 'reviewer' }, 'owner')).status, 400);
+    assert.equal((await req('POST', `/api/assessments/${a}/members`, { email: 'nobody@t.dev', role: 'reviewer' }, 'owner')).status, 404);
+    assert.equal((await req('POST', `/api/assessments/${a}/members`, { email: 'rev@t.dev', role: 'reviewer' }, 'owner')).status, 200);
+    assert.equal((await req('POST', `/api/assessments/${a}/members`, { email: 'ed@t.dev', role: 'editor' }, 'owner')).status, 200);
+    assert.equal((await req('POST', `/api/assessments/${a}/members`, { email: 'out@t.dev', role: 'editor' }, 'ed')).status, 403, 'editors cannot manage the team');
+
+    // Reviewer: sees it in lists, reads reports, decides, reviews flags — but cannot edit or invite.
+    const list = await req('GET', '/api/assessments', undefined, 'rev');
+    assert.deepEqual(list.body.assessments.map((x: any) => [x.id, x.role]), [[a, 'reviewer']]);
+    assert.equal((await req('GET', '/api/hiring/overview', undefined, 'rev')).body.stats.awaitingReview, 1);
+    const rep = await req('GET', `/api/attempts/${inv.id}`, undefined, 'rev');
+    assert.equal(rep.status, 200);
+    assert.equal(rep.body.role, 'reviewer');
+    assert.equal((await req('PUT', `/api/attempts/${inv.id}/review`, { decision: 'hold', notes: '' }, 'rev')).status, 200);
+    assert.equal((await req('POST', `/api/assessments/${a}/invites`, { candidates: [{ email: 'x@t.dev' }] }, 'rev')).status, 403);
+    assert.equal((await req('PUT', `/api/assessments/${a}`, { title: 'Hacked', durationMin: 10, questions: [{ questionId: q, points: 10 }] }, 'rev')).status, 403);
+    assert.equal((await req('DELETE', `/api/attempts/${inv.id}/proctoring`, undefined, 'rev')).status, 403);
+
+    // Editor can invite.
+    assert.equal((await req('POST', `/api/assessments/${a}/invites`, { candidates: [{ email: 'y@t.dev' }] }, 'ed')).status, 200);
+    // Outsider sees nothing.
+    assert.equal((await req('GET', `/api/attempts/${inv.id}`, undefined, 'out')).status, 404);
+    assert.equal((await req('GET', '/api/assessments', undefined, 'out')).body.assessments.length, 0);
+
+    // Flag review: keyed by the flag, attributed to the reviewer.
+    const key = rep.body.flagKeys[0];
+    assert.match(rep.body.integrity.flags[0], /Left the test tab 3 times/);
+    assert.equal((await req('PUT', `/api/attempts/${inv.id}/flags`, { key, status: 'explained', note: 'Network dropped; confirmed by email.' }, 'rev')).status, 200);
+    assert.equal((await req('PUT', `/api/attempts/${inv.id}/flags`, { key, status: 'explained' }, 'out')).status, 404);
+    assert.equal((await req('PUT', `/api/attempts/${inv.id}/flags`, { key: 'not-a-key', status: 'explained' }, 'rev')).status, 400);
+    const after1 = await req('GET', `/api/attempts/${inv.id}`, undefined, 'owner');
+    assert.equal(after1.body.flagReviews[key].status, 'explained');
+    assert.equal(after1.body.flagReviews[key].reviewer, 'REV');
+
+    // Removing a member revokes access.
+    const mem = await req('GET', `/api/assessments/${a}/members`, undefined, 'owner');
+    const revId = mem.body.members.find((m: any) => m.email === 'rev@t.dev').id;
+    await req('DELETE', `/api/assessments/${a}/members/${revId}`, undefined, 'owner');
+    assert.equal((await req('GET', `/api/attempts/${inv.id}`, undefined, 'rev')).status, 404);
+  });
+});

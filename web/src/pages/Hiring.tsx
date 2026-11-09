@@ -8,7 +8,7 @@ import { useAuth } from '../lib/auth';
 import { ago, cx } from '../lib/format';
 import { INTEGRITY_CLS } from './AssessmentDetail';
 
-interface Row { id: number; title: string; status: string; durationMin: number; createdAt: number; questions: number; invited: number; started: number; completed: number; avgPct: number | null }
+interface Row { role?: 'owner' | 'editor' | 'reviewer' | null; id: number; title: string; status: string; durationMin: number; createdAt: number; questions: number; invited: number; started: number; completed: number; avgPct: number | null }
 interface Overview {
   stats: { activeAssessments: number; inProgress: number; completedThisWeek: number; awaitingReview: number; flagged: number };
   awaitingReview: { attemptId: number; name: string; assessmentId: number; assessment: string; scorePct: number | null; submittedAt: number; integrity: { score: number; level: string } | null }[];
@@ -117,6 +117,7 @@ export function Hiring() {
                     <div className="flex items-center gap-2">
                       <h3 className="truncate font-semibold text-ink-100 group-hover:text-ember-200">{a.title}</h3>
                       <Badge className={STATUS_CLS[a.status]}>{a.status}</Badge>
+                      {a.role && a.role !== 'owner' && <Badge className="border-sky-500/40 text-sky-300">shared · {a.role}</Badge>}
                     </div>
                     <div className="mt-0.5 flex items-center gap-3 text-xs text-ink-400"><span>{a.questions} questions</span><span className="flex items-center gap-1"><Clock className="size-3" />{a.durationMin} min</span><span>created {ago(a.createdAt)}</span></div>
                   </div>

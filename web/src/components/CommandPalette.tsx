@@ -1,4 +1,4 @@
-import { ArrowRight, ClipboardList, Code2, Database, FileQuestion, Gauge, Home, LayoutDashboard, ListChecks, Moon, Plus, Search, Sun, Trophy } from 'lucide-react';
+import { ArrowRight, ClipboardList, Flag, Code2, Database, FileQuestion, Gauge, Home, LayoutDashboard, ListChecks, Moon, Plus, Search, Sun, Trophy } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
@@ -45,6 +45,7 @@ export function CommandPalette() {
     const pages: Item[] = [
       { id: 'p-home', label: 'Home', group: 'Go to', icon: Home, run: go('/') },
       { id: 'p-practice', label: 'Practice problems', group: 'Go to', icon: Code2, run: go('/problems') },
+      { id: 'p-contests', label: 'Contests', group: 'Go to', icon: Flag, run: go('/contests') },
       { id: 'p-board', label: 'Leaderboard', group: 'Go to', icon: Trophy, run: go('/leaderboard') },
       ...(user ? [{ id: 'p-progress', label: 'My progress', group: 'Go to', icon: Gauge, run: go('/dashboard') }] : []),
       ...(isStaff(user) ? [

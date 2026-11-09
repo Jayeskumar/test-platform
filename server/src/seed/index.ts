@@ -2,6 +2,7 @@ import { hashPassword } from '../auth.js';
 import { config } from '../config.js';
 import { getDb, now } from '../db/index.js';
 import { createAssessment, inviteCandidates } from '../routes/assessments.js';
+import { createContest } from '../routes/contests.js';
 import { createQuestion } from '../routes/library.js';
 import { finalizeAttempt } from '../routes/take.js';
 import { DEMO_CANDIDATES } from './candidates.js';
@@ -79,11 +80,39 @@ export async function seedIfEmpty(log = console.log, opts: { demo?: boolean } = 
       80 + (ago % 300), 12000 + (ago % 9000), created, created + 1500,
     );
   };
+  const demoUsers: number[] = [];
   LEADERBOARD_USERS.forEach((name, i) => {
     const uid = addUser(`${name.split(' ')[0].toLowerCase()}@demo.crucible.dev`, name, 'candidate');
+    demoUsers.push(uid);
     const count = practice.length - i * 2;
     practice.slice(0, count).forEach((p, k) => insertPractice(uid, p.slug, 'AC', (k * 3 + i + 1) * day + k * 3600_000));
   });
+  // Contests: one running now (with a live board), one finished, one upcoming.
+  const contestProblems = ['balanced-brackets', 'longest-unique-streak', 'warehouse-robot', 'change-making-ways'].map((s) => qid[s]);
+  const seedContest = (title: string, startsAt: number, durationMin: number, freezeMin: number, plan: number[][]) => {
+    const { id } = createContest({ title, description: 'Four problems, two hours. ICPC rules: problems solved, then penalty time (minutes to accept + 20 per rejected attempt).', startsAt, durationMin, penaltyMin: 20, freezeMin, problems: contestProblems }, recruiter);
+    demoUsers.forEach((uid, u) => {
+      db.run('INSERT INTO contest_entries (contest_id, user_id, joined_at) VALUES (?, ?, ?)', id, uid, startsAt - 600_000);
+      // plan[u][p]: minute of accept (>0), -k for k wrong attempts without accept, 0 for untouched
+      (plan[u] ?? []).forEach((v, p) => {
+        const q = contestProblems[p];
+        const wrong = v < 0 ? -v : Math.max(0, (u + p) % 3 - 1);
+        for (let k = 0; k < wrong; k++) {
+          db.run("INSERT INTO submissions (user_id, contest_id, question_id, language, code, kind, status, verdict, created_at, finished_at) VALUES (?, ?, ?, 'python', '', 'submit', 'done', ?, ?, ?)",
+            uid, id, q, k % 2 ? 'TLE' : 'WA', startsAt + Math.max(1, (v > 0 ? v : 30) - 4 + k) * 60_000, startsAt + 60_000);
+        }
+        if (v > 0) {
+          db.run("INSERT INTO submissions (user_id, contest_id, question_id, language, code, kind, status, verdict, created_at, finished_at) VALUES (?, ?, ?, 'python', '', 'submit', 'done', 'AC', ?, ?)",
+            uid, id, q, startsAt + v * 60_000 + 5000, startsAt + v * 60_000 + 6000);
+        }
+      });
+    });
+  };
+  const nowMs = now();
+  seedContest('Weekly Sprint #42', nowMs - 38 * 60_000, 120, 30, [[6, 17, 31, 0], [9, 0, 24, -2], [4, 21, 0, 0], [12, 33, -1, 0], [8, -3, 0, 0], [0, 0, 0, 0]]);
+  seedContest('Opening Round', nowMs - 2 * day - 3 * 3600_000, 120, 0, [[7, 19, 44, 88], [5, 26, 61, 0], [11, 31, 52, 97], [9, 0, 73, -2], [15, 40, -3, 0], [22, -1, 0, 0]]);
+  seedContest('Weekly Sprint #43', nowMs + 3 * day + 2 * 3600_000, 120, 30, []);
+
   const casey = ids['candidate@crucible.dev'];
   const caseyHistory: [string, string, number][] = [
     ['pair-sum-count', 'WA', 20], ['pair-sum-count', 'AC', 20], ['balanced-brackets', 'AC', 18], ['count-islands', 'AC', 12],

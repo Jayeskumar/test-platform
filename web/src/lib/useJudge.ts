@@ -16,7 +16,7 @@ export interface JudgeState {
 const initial: JudgeState = { id: null, kind: null, phase: 'idle', compile: null, results: [], total: 0, submission: null, error: null };
 
 /** Submit code and follow judging live over server-sent events. */
-export function useJudge(opts: { attemptToken?: string; onDone?: (s: Submission) => void } = {}) {
+export function useJudge(opts: { attemptToken?: string; contestSlug?: string; onDone?: (s: Submission) => void } = {}) {
   const [state, setState] = useState<JudgeState>(initial);
   const es = useRef<EventSource | null>(null);
   const onDone = useRef(opts.onDone);
@@ -65,13 +65,13 @@ export function useJudge(opts: { attemptToken?: string; onDone?: (s: Submission)
   const submit = useCallback(async (body: { questionId: number; language: string; code: string; kind: 'run' | 'submit'; customInput?: string | null }) => {
     setState({ ...initial, phase: 'queued', kind: body.kind });
     try {
-      const r = await api.post<{ id: number }>('/api/submissions', { ...body, attemptToken: opts.attemptToken });
+      const r = await api.post<{ id: number }>('/api/submissions', { ...body, attemptToken: opts.attemptToken, contestSlug: opts.contestSlug });
       setState((s) => ({ ...s, id: r.id }));
       follow(r.id, body.kind);
     } catch (e: any) {
       setState({ ...initial, phase: 'error', error: e.message, kind: body.kind });
     }
-  }, [follow, opts.attemptToken]);
+  }, [follow, opts.attemptToken, opts.contestSlug]);
 
   const reset = useCallback(() => { es.current?.close(); setState(initial); }, []);
   const busy = state.phase !== 'idle' && state.phase !== 'done' && state.phase !== 'error';

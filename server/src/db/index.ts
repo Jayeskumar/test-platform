@@ -189,6 +189,55 @@ const MIGRATIONS: string[] = [
   ALTER TABLE attempts ADD COLUMN decided_at INTEGER;
   ALTER TABLE attempts ADD COLUMN decided_by TEXT;
   `,
+  // 3 — contests
+  `
+  CREATE TABLE IF NOT EXISTS contests (
+    id INTEGER PRIMARY KEY,
+    slug TEXT NOT NULL UNIQUE,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    starts_at INTEGER NOT NULL,
+    ends_at INTEGER NOT NULL,
+    penalty_min INTEGER NOT NULL DEFAULT 20,
+    freeze_min INTEGER NOT NULL DEFAULT 0,
+    owner_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    created_at INTEGER NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS contest_problems (
+    contest_id INTEGER NOT NULL REFERENCES contests(id) ON DELETE CASCADE,
+    question_id INTEGER NOT NULL REFERENCES questions(id) ON DELETE CASCADE,
+    label TEXT NOT NULL,
+    ord INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (contest_id, question_id)
+  );
+  CREATE TABLE IF NOT EXISTS contest_entries (
+    contest_id INTEGER NOT NULL REFERENCES contests(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    joined_at INTEGER NOT NULL,
+    PRIMARY KEY (contest_id, user_id)
+  );
+  ALTER TABLE submissions ADD COLUMN contest_id INTEGER REFERENCES contests(id) ON DELETE CASCADE;
+  CREATE INDEX IF NOT EXISTS idx_sub_contest ON submissions(contest_id, user_id, question_id);
+  `,
+  // 4 — team hiring: collaborators and reviewed integrity flags
+  `
+  CREATE TABLE IF NOT EXISTS assessment_members (
+    assessment_id INTEGER NOT NULL REFERENCES assessments(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    role TEXT NOT NULL CHECK (role IN ('reviewer','editor')),
+    added_at INTEGER NOT NULL,
+    PRIMARY KEY (assessment_id, user_id)
+  );
+  CREATE TABLE IF NOT EXISTS flag_reviews (
+    attempt_id INTEGER NOT NULL REFERENCES attempts(id) ON DELETE CASCADE,
+    flag_key TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('explained','concern')),
+    note TEXT NOT NULL DEFAULT '',
+    reviewer TEXT NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (attempt_id, flag_key)
+  );
+  `,
 ];
 
 function migrate(db: DatabaseSync) {

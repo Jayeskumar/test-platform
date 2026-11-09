@@ -114,7 +114,8 @@ export class JudgeService extends EventEmitter {
       outcome = await this.judge.judgeSql({ query: sub.code, schema: data.schema ?? '', tests, ordered: !!data.ordered }, ev);
     } else if (q.type === 'coding') {
       const limits = { timeMs: data.limits?.timeMs ?? 2000, memoryMb: data.limits?.memoryMb ?? 256 };
-      const wantComplexity = sub.kind === 'submit' && data.complexity?.generator && data.complexity?.sizes?.length;
+      // Contest verdicts should land immediately, so the complexity analysis runs in practice only.
+      const wantComplexity = sub.kind === 'submit' && !sub.contest_id && data.complexity?.generator && data.complexity?.sizes?.length;
       outcome = await this.judge.judgeCode(
         {
           language: sub.language,
@@ -138,6 +139,7 @@ export class JudgeService extends EventEmitter {
     const done = db.get<any>('SELECT * FROM submissions WHERE id = ?', id);
     if (done.attempt_id) applySubmissionToAttempt(done);
     this.emitFor(id, { type: 'done', submission: done });
+    if (done.contest_id) this.emit(`contest:${done.contest_id}`);
   }
 }
 

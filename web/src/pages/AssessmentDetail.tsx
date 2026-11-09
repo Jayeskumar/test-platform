@@ -1,9 +1,9 @@
-import { AlertTriangle, ArrowDown, ArrowUp, Check, Columns3, Copy, Download, Pencil, Search, ShieldAlert, UserPlus } from 'lucide-react';
+import { AlertTriangle, ArrowDown, ArrowUp, Check, Columns3, Copy, Download, Pencil, Search, ShieldAlert, UserPlus, Users, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Histogram } from '../components/charts';
 import { Page, PageHeader } from '../components/Layout';
-import { Badge, Button, Card, Difficulty, Empty, ErrorBox, Input, Label, PageLoader, Stat, Textarea } from '../components/ui';
+import { Badge, Button, Card, Difficulty, Empty, ErrorBox, Input, Label, PageLoader, Select, Stat, Textarea } from '../components/ui';
 import { useToast } from '../lib/toast';
 import { api } from '../lib/api';
 import { ago, cx, duration, pct } from '../lib/format';
@@ -16,7 +16,7 @@ interface Attempt {
   decision: Decision; notes: string; scores: Record<number, number>; questionIds: number[] | null;
 }
 interface Detail {
-  assessment: { id: number; title: string; description: string; durationMin: number; status: string };
+  assessment: { id: number; title: string; description: string; durationMin: number; status: string; role: 'owner' | 'editor' | 'reviewer' };
   questions: { id: number; title: string; type: string; difficulty: 'easy' | 'medium' | 'hard'; points: number; pool: string | null }[];
   perQuestion: { questionId: number; avgPct: number; candidates: number }[];
   attempts: Attempt[];
@@ -193,6 +193,49 @@ function CandidatesTable({ detail: d }: { detail: Detail }) {
   );
 }
 
+function TeamCard({ assessmentId, canManage }: { assessmentId: number; canManage: boolean }) {
+  const toast = useToast();
+  const [team, setTeam] = useState<{ owner: { name: string; email: string }; members: { id: number; name: string; email: string; role: string }[] } | null>(null);
+  const [email, setEmail] = useState('');
+  const [role, setRole] = useState<'reviewer' | 'editor'>('reviewer');
+  const [busy, setBusy] = useState(false);
+  const load = useCallback(() => { api.get<any>(`/api/assessments/${assessmentId}/members`).then(setTeam).catch(() => {}); }, [assessmentId]);
+  useEffect(load, [load]);
+  const add = async () => {
+    setBusy(true);
+    try { await api.post(`/api/assessments/${assessmentId}/members`, { email, role }); toast.success(`Added ${email} as ${role}`); setEmail(''); load(); }
+    catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  };
+  const remove = async (m: { id: number; email: string }) => {
+    try { await api.del(`/api/assessments/${assessmentId}/members/${m.id}`); toast.info(`Removed ${m.email}`); load(); } catch (e: any) { toast.error(e.message); }
+  };
+  if (!team) return null;
+  const initials = (n: string) => n.split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase();
+  return (
+    <Card className="p-5">
+      <h2 className="mb-3 flex items-center gap-2 font-semibold text-ink-100"><Users className="size-4 text-ember-400" /> Hiring team</h2>
+      <ul className="space-y-2">
+        {[{ id: 0, name: team.owner.name, email: team.owner.email, role: 'owner' }, ...team.members].map((m) => (
+          <li key={m.email} className="flex items-center gap-2.5 text-sm">
+            <span className="grid size-7 place-items-center rounded-full bg-ink-800 text-[10px] font-semibold text-ink-200">{initials(m.name)}</span>
+            <div className="min-w-0 flex-1"><div className="truncate text-ink-100">{m.name}</div><div className="truncate text-xs text-ink-400">{m.email}</div></div>
+            <Badge className={m.role === 'owner' ? 'border-ember-500/40 text-ember-300' : m.role === 'editor' ? 'border-sky-500/40 text-sky-300' : undefined}>{m.role}</Badge>
+            {canManage && m.role !== 'owner' && <button onClick={() => remove(m)} className="text-ink-400 hover:text-rose-300" aria-label={`Remove ${m.email}`}><X className="size-4" /></button>}
+          </li>
+        ))}
+      </ul>
+      {canManage && (
+        <div className="mt-3 flex gap-2">
+          <Input type="email" aria-label="Teammate email" placeholder="teammate@company.com" value={email} onChange={(e) => setEmail(e.target.value)} className="h-8 min-w-0 flex-1 py-1 text-xs" />
+          <Select aria-label="Role" value={role} onChange={(e) => setRole(e.target.value as any)} className="h-8 w-24 py-0 text-xs"><option value="reviewer">Reviewer</option><option value="editor">Editor</option></Select>
+          <Button size="sm" onClick={add} loading={busy} disabled={!email.includes('@')}>Add</Button>
+        </div>
+      )}
+      <p className="mt-2 text-[11px] text-ink-500">Reviewers see reports and record decisions; editors can also invite candidates and change the assessment.</p>
+    </Card>
+  );
+}
+
 export function AssessmentDetail() {
   const { id } = useParams();
   const nav = useNavigate();
@@ -242,7 +285,7 @@ export function AssessmentDetail() {
       <PageHeader
         title={d.assessment.title}
         subtitle={`${d.questions.length} questions · ${d.assessment.durationMin} minutes · ${d.assessment.status}`}
-        actions={<Button onClick={() => nav(`/hiring/${id}/edit`)}><Pencil className="size-4" /> Edit</Button>}
+        actions={d.assessment.role !== 'reviewer' ? <Button onClick={() => nav(`/hiring/${id}/edit`)}><Pencil className="size-4" /> Edit</Button> : <Badge className="border-sky-500/40 text-sky-300">you’re a reviewer</Badge>}
       />
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat label="Candidates" value={d.attempts.length} sub={`${d.attempts.filter((a) => a.status === 'in_progress').length} in progress`} />
@@ -255,7 +298,8 @@ export function AssessmentDetail() {
           <CandidatesTable detail={d} />
         </Card>
         <div className="space-y-4">
-          <Card className="p-5">
+          <TeamCard assessmentId={d.assessment.id} canManage={d.assessment.role === 'owner'} />
+          {d.assessment.role !== 'reviewer' && <Card className="p-5">
             <h2 className="mb-3 flex items-center gap-2 font-semibold text-ink-100"><UserPlus className="size-4 text-ember-400" /> Invite candidates</h2>
             <Label hint="one per line">Emails</Label>
             <Textarea aria-label="Emails" rows={4} value={emails} onChange={(e) => setEmails(e.target.value)} placeholder={'jane@company.com\nSam Lee <sam@example.com>'} />
@@ -270,7 +314,7 @@ export function AssessmentDetail() {
                 ))}
               </div>
             )}
-          </Card>
+          </Card>}
           <Card className="p-5">
             <h2 className="mb-3 font-semibold text-ink-100">Score distribution</h2>
             {pcts.length ? <Histogram values={pcts} /> : <p className="text-sm text-ink-400">Appears after the first submission.</p>}

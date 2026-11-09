@@ -35,6 +35,9 @@ interface Report {
     access: { devices: number; networks: number; sharedWith: SharedWith[] };
   } | null;
   ai: { enabled: boolean; review: any };
+  role: 'owner' | 'editor' | 'reviewer';
+  flagKeys: string[];
+  flagReviews: Record<string, { status: 'explained' | 'concern'; note: string; reviewer: string; updatedAt: number }>;
 }
 
 const EVENT_STYLE: Record<string, { icon: any; cls: string; label: string }> = {
@@ -213,6 +216,37 @@ function DecisionPanel({ r, onSaved }: { r: Report; onSaved: (d: Decision, notes
   );
 }
 
+/** One integrity flag with its review: explained (with a reason) or a concern. */
+function FlagRow({ attemptId, text, flagKey, review, onChange }: { attemptId: number; text: string; flagKey: string; review?: Report['flagReviews'][string]; onChange: () => void }) {
+  const toast = useToast();
+  const [noting, setNoting] = useState(false);
+  const [note, setNote] = useState(review?.note ?? '');
+  const save = async (status: 'explained' | 'concern' | null, n = note) => {
+    try { await api.put(`/api/attempts/${attemptId}/flags`, { key: flagKey, status, note: n }); setNoting(false); onChange(); }
+    catch (e: any) { toast.error(e.message); }
+  };
+  const st = review?.status;
+  return (
+    <li className={cx('rounded-lg border px-3 py-2', st === 'explained' ? 'border-emerald-500/25 bg-emerald-500/5' : st === 'concern' ? 'border-rose-500/30 bg-rose-500/5' : 'border-transparent')}>
+      <div className="flex flex-wrap items-start gap-2">
+        <span className={cx('mt-0.5', st === 'explained' ? 'text-emerald-400' : 'text-amber-400')} aria-hidden="true">{st === 'explained' ? '✓' : '▲'}</span>
+        <span className={cx('min-w-0 flex-1 text-sm', st === 'explained' ? 'text-ink-400 line-through decoration-ink-600' : 'text-ink-200')}>{text}</span>
+        <div className="no-print flex gap-1">
+          <button onClick={() => (st === 'explained' ? save(null) : setNoting(true))} aria-pressed={st === 'explained'} className={cx('rounded-md border px-2 py-0.5 text-[11px]', st === 'explained' ? 'border-emerald-500/50 bg-emerald-500/15 text-emerald-300' : 'border-ink-700 text-ink-400 hover:text-ink-100')}>Explained</button>
+          <button onClick={() => save(st === 'concern' ? null : 'concern')} aria-pressed={st === 'concern'} className={cx('rounded-md border px-2 py-0.5 text-[11px]', st === 'concern' ? 'border-rose-500/50 bg-rose-500/15 text-rose-300' : 'border-ink-700 text-ink-400 hover:text-ink-100')}>Concern</button>
+        </div>
+      </div>
+      {review && !noting && <div className="mt-1 pl-5 text-xs text-ink-400">{review.status === 'explained' ? 'Explained' : 'Concern'} by {review.reviewer}{review.note ? ` — “${review.note}”` : ''}</div>}
+      {noting && (
+        <div className="no-print mt-2 flex gap-2 pl-5">
+          <input autoFocus value={note} onChange={(e) => setNote(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void save('explained'); if (e.key === 'Escape') setNoting(false); }} placeholder="Why is this fine? (e.g. confirmed network outage)" aria-label="Explanation" className="h-8 min-w-0 flex-1 rounded-md border border-ink-700 bg-ink-900 px-2 text-xs text-ink-100 focus:border-ember-500/60 focus:outline-none" />
+          <Button size="sm" onClick={() => save('explained')}>Save</Button>
+        </div>
+      )}
+    </li>
+  );
+}
+
 const SECTIONS: [string, string][] = [['overview', 'Overview'], ['integrity', 'Integrity'], ['proctoring', 'Proctoring'], ['devices', 'Devices'], ['ai', 'AI review'], ['questions', 'Questions']];
 
 export function CandidateReport() {
@@ -264,11 +298,17 @@ export function CandidateReport() {
 
       {r.integrity && (
         <Card id="integrity" className="mt-4 scroll-mt-28 p-5">
-          <h2 className="mb-3 font-semibold text-ink-100">Integrity timeline</h2>
+          <div className="mb-3 flex flex-wrap items-baseline gap-2">
+            <h2 className="font-semibold text-ink-100">Integrity timeline</h2>
+            {r.integrity.flags.length > 0 && (() => {
+              const done = r.flagKeys.filter((k) => r.flagReviews[k]).length;
+              return <span className={cx('text-xs', done === r.flagKeys.length ? 'text-emerald-300' : 'text-ink-400')}>{done} of {r.flagKeys.length} flags reviewed</span>;
+            })()}
+          </div>
           <Timeline r={r} />
           <div className="mt-4 grid gap-4 md:grid-cols-[1fr_auto]">
             <ul className="space-y-1.5 text-sm">
-              {r.integrity.flags.length ? r.integrity.flags.map((f, i) => <li key={i} className="flex gap-2 text-ink-200"><span className="text-amber-400">▲</span>{f}</li>) : <li className="text-emerald-300">No integrity concerns detected.</li>}
+              {r.integrity.flags.length ? r.integrity.flags.map((f, i) => <FlagRow key={r.flagKeys[i]} attemptId={a.id} text={f} flagKey={r.flagKeys[i]} review={r.flagReviews[r.flagKeys[i]]} onChange={load} />) : <li className="text-emerald-300">No integrity concerns detected.</li>}
             </ul>
             <div className="grid h-fit grid-cols-3 gap-2 text-center text-xs">
               {[['Tab switches', r.integrity.counts.tab_hidden ?? 0], ['Pastes', r.integrity.counts.paste ?? 0], ['Fullscreen exits', r.integrity.counts.fullscreen_exit ?? 0]].map(([l, v]) => (
@@ -281,10 +321,10 @@ export function CandidateReport() {
       )}
 
       {(r.media.length > 0 || r.assessment.proctoring.webcam || r.assessment.proctoring.identityCheck) && (
-        <div id="proctoring" className="mt-4 scroll-mt-28"><ProctoringPanel attemptId={a.id} media={r.media} startedAt={a.startedAt} retentionDays={r.assessment.retentionDays} webcam={r.assessment.proctoring.webcam} onDeleted={load} /></div>
+        <div id="proctoring" className="mt-4 scroll-mt-28"><ProctoringPanel attemptId={a.id} media={r.media} startedAt={a.startedAt} retentionDays={r.assessment.retentionDays} webcam={r.assessment.proctoring.webcam} onDeleted={load} canDelete={r.role !== 'reviewer'} /></div>
       )}
       {a.status !== 'invited' && (
-        <div id="devices" className="mt-4 scroll-mt-28"><AccessPanel attemptId={a.id} access={r.access} sharedWith={r.integrity?.access.sharedWith ?? []} startedAt={a.startedAt} canUnlock={r.assessment.proctoring.singleDevice && a.status === 'in_progress' && a.deviceLocked} onChanged={load} /></div>
+        <div id="devices" className="mt-4 scroll-mt-28"><AccessPanel attemptId={a.id} access={r.access} sharedWith={r.integrity?.access.sharedWith ?? []} startedAt={a.startedAt} canUnlock={r.role !== 'reviewer' && r.assessment.proctoring.singleDevice && a.status === 'in_progress' && a.deviceLocked} onChanged={load} /></div>
       )}
       <div id="ai" className={cx('mt-4 scroll-mt-28', !r.ai.review && 'no-print')}><AiReview r={r} onReview={(review) => setR({ ...r, ai: { ...r.ai, review } })} /></div>
 

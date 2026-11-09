@@ -5,6 +5,7 @@ import { getDb, now, parseJson } from '../db/index.js';
 import { presentSubmission, presentTestEvent, publicQuestion } from '../questions.js';
 import { gradeMcq } from '../scoring.js';
 import { getService, type JudgeEvent, type QuestionRow } from '../service.js';
+import { contestForSubmission } from './contests.js';
 import { activeAttemptByToken, attemptHasQuestion } from './take.js';
 
 const DIFF_POINTS: Record<string, number> = { easy: 10, medium: 25, hard: 50 };
@@ -17,6 +18,7 @@ const SubmitBody = z.object({
   kind: z.enum(['run', 'submit']),
   customInput: z.string().max(1_000_000).nullish(),
   attemptToken: z.string().optional(),
+  contestSlug: z.string().max(80).optional(),
 });
 
 /** Who can see a submission, and with what level of detail. */
@@ -36,18 +38,18 @@ export async function practiceRoutes(app: FastifyInstance) {
     const db = getDb();
     const rows = db.all<any>(
       `SELECT q.id, q.slug, q.type, q.title, q.difficulty, q.tags,
-        (SELECT COUNT(*) FROM submissions s WHERE s.question_id = q.id AND s.kind = 'submit' AND s.attempt_id IS NULL) AS submissions,
-        (SELECT COUNT(*) FROM submissions s WHERE s.question_id = q.id AND s.kind = 'submit' AND s.attempt_id IS NULL AND s.verdict = 'AC') AS accepted
+        (SELECT COUNT(*) FROM submissions s WHERE s.question_id = q.id AND s.kind = 'submit' AND s.attempt_id IS NULL AND s.contest_id IS NULL) AS submissions,
+        (SELECT COUNT(*) FROM submissions s WHERE s.question_id = q.id AND s.kind = 'submit' AND s.attempt_id IS NULL AND s.contest_id IS NULL AND s.verdict = 'AC') AS accepted
        FROM questions q WHERE q.visibility = 'public' ORDER BY CASE q.difficulty WHEN 'easy' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END, q.id`,
     );
     const status = new Map<number, string>();
     if (user) {
       for (const r of db.all<any>(
         `SELECT question_id, MAX(CASE WHEN verdict = 'AC' THEN 2 ELSE 1 END) AS s FROM submissions
-         WHERE user_id = ? AND attempt_id IS NULL AND kind = 'submit' GROUP BY question_id`,
+         WHERE user_id = ? AND attempt_id IS NULL AND contest_id IS NULL AND kind = 'submit' GROUP BY question_id`,
         user.id,
       )) status.set(r.question_id, r.s === 2 ? 'solved' : 'attempted');
-      for (const r of db.all<any>("SELECT DISTINCT question_id FROM submissions WHERE user_id = ? AND attempt_id IS NULL AND kind = 'run'", user.id)) {
+      for (const r of db.all<any>("SELECT DISTINCT question_id FROM submissions WHERE user_id = ? AND attempt_id IS NULL AND contest_id IS NULL AND kind = 'run'", user.id)) {
         if (!status.has(r.question_id)) status.set(r.question_id, 'attempted');
       }
     }
@@ -93,8 +95,11 @@ export async function practiceRoutes(app: FastifyInstance) {
       ? db.get<QuestionRow>('SELECT * FROM questions WHERE id = ?', body.questionId)
       : db.get<QuestionRow>('SELECT * FROM questions WHERE slug = ?', body.slug ?? '');
     if (!q) throw new HttpError(404, 'Question not found.');
+    let contestId: number | null = null;
     if (attemptId) {
       if (!attemptHasQuestion(attemptId, q.id)) throw new HttpError(403, 'This question is not part of your test.');
+    } else if (body.contestSlug) {
+      contestId = contestForSubmission(body.contestSlug, user, q.id);
     } else if (q.visibility !== 'public' && !isStaff(user)) {
       throw new HttpError(404, 'Question not found.');
     }
@@ -113,9 +118,9 @@ export async function practiceRoutes(app: FastifyInstance) {
     if (busy >= 3) throw new HttpError(429, 'You already have submissions being judged — give them a moment.');
 
     const { id } = db.run(
-      `INSERT INTO submissions (user_id, attempt_id, question_id, language, code, kind, custom_input, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      user?.id ?? null, attemptId, q.id, language, body.code, body.kind, body.customInput ?? null, now(),
+      `INSERT INTO submissions (user_id, attempt_id, contest_id, question_id, language, code, kind, custom_input, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      user?.id ?? null, attemptId, contestId, q.id, language, body.code, body.kind, body.customInput ?? null, now(),
     );
     if (attemptId) {
       db.run(
@@ -186,7 +191,7 @@ export async function practiceRoutes(app: FastifyInstance) {
     const { slug } = req.params as { slug: string };
     const rows = getDb().all<any>(
       `SELECT s.* FROM submissions s JOIN questions q ON q.id = s.question_id
-       WHERE q.slug = ? AND s.user_id = ? AND s.attempt_id IS NULL AND s.kind = 'submit' ORDER BY s.id DESC LIMIT 50`,
+       WHERE q.slug = ? AND s.user_id = ? AND s.attempt_id IS NULL AND s.contest_id IS NULL AND s.kind = 'submit' ORDER BY s.id DESC LIMIT 50`,
       slug, user.id,
     );
     return { submissions: rows.map((r) => presentSubmission(r, { staff: isStaff(user) })) };
@@ -197,7 +202,7 @@ export async function practiceRoutes(app: FastifyInstance) {
     const db = getDb();
     const solved = db.all<any>(
       `SELECT DISTINCT q.id, q.slug, q.title, q.difficulty, q.tags, q.type FROM submissions s JOIN questions q ON q.id = s.question_id
-       WHERE s.user_id = ? AND s.attempt_id IS NULL AND s.verdict = 'AC' AND s.kind = 'submit'`,
+       WHERE s.user_id = ? AND s.attempt_id IS NULL AND s.contest_id IS NULL AND s.verdict = 'AC' AND s.kind = 'submit'`,
       user.id,
     );
     const totals = db.all<any>("SELECT difficulty, COUNT(*) AS n FROM questions WHERE visibility = 'public' AND type != 'mcq' GROUP BY difficulty");
@@ -224,7 +229,7 @@ export async function practiceRoutes(app: FastifyInstance) {
     );
     const recent = db.all<any>(
       `SELECT s.id, s.verdict, s.language, s.created_at, s.time_ms, q.title, q.slug FROM submissions s JOIN questions q ON q.id = s.question_id
-       WHERE s.user_id = ? AND s.kind = 'submit' AND s.attempt_id IS NULL ORDER BY s.id DESC LIMIT 10`,
+       WHERE s.user_id = ? AND s.kind = 'submit' AND s.attempt_id IS NULL AND s.contest_id IS NULL ORDER BY s.id DESC LIMIT 10`,
       user.id,
     );
     const points = solved.reduce((s, q) => s + (DIFF_POINTS[q.difficulty] ?? 0), 0);
@@ -238,7 +243,7 @@ export async function practiceRoutes(app: FastifyInstance) {
     }
     const rank = db.all<any>(
       `SELECT s.user_id, SUM(CASE q.difficulty WHEN 'easy' THEN 10 WHEN 'medium' THEN 25 ELSE 50 END) AS pts FROM
-        (SELECT DISTINCT user_id, question_id FROM submissions WHERE verdict = 'AC' AND kind = 'submit' AND attempt_id IS NULL AND user_id IS NOT NULL) s
+        (SELECT DISTINCT user_id, question_id FROM submissions WHERE verdict = 'AC' AND kind = 'submit' AND attempt_id IS NULL AND contest_id IS NULL AND user_id IS NOT NULL) s
         JOIN questions q ON q.id = s.question_id GROUP BY s.user_id`,
     );
     const better = rank.filter((r) => r.pts > points).length;
@@ -262,7 +267,7 @@ export async function practiceRoutes(app: FastifyInstance) {
         SUM(CASE q.difficulty WHEN 'easy' THEN 10 WHEN 'medium' THEN 25 ELSE 50 END) AS points,
         MAX(s.first_ac) AS last_solve
        FROM (SELECT user_id, question_id, MIN(created_at) AS first_ac FROM submissions
-             WHERE verdict = 'AC' AND kind = 'submit' AND attempt_id IS NULL AND user_id IS NOT NULL GROUP BY user_id, question_id) s
+             WHERE verdict = 'AC' AND kind = 'submit' AND attempt_id IS NULL AND contest_id IS NULL AND user_id IS NOT NULL GROUP BY user_id, question_id) s
        JOIN questions q ON q.id = s.question_id JOIN users u ON u.id = s.user_id
        GROUP BY u.id ORDER BY points DESC, last_solve ASC LIMIT 100`,
     );

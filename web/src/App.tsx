@@ -19,6 +19,10 @@ const Problems = lazy(() => import('./pages/Problems').then((m) => ({ default: m
 const QuestionEditor = lazy(() => import('./pages/QuestionEditor').then((m) => ({ default: m.QuestionEditor })));
 const Solve = lazy(() => import('./pages/Solve').then((m) => ({ default: m.Solve })));
 const TakeTest = lazy(() => import('./pages/TakeTest').then((m) => ({ default: m.TakeTest })));
+const Contests = lazy(() => import('./pages/Contests').then((m) => ({ default: m.Contests })));
+const Contest = lazy(() => import('./pages/Contest').then((m) => ({ default: m.Contest })));
+const ContestSolve = lazy(() => import('./pages/ContestSolve').then((m) => ({ default: m.ContestSolve })));
+const ContestNew = lazy(() => import('./pages/ContestNew').then((m) => ({ default: m.ContestNew })));
 const Login = lazy(() => import('./pages/Auth').then((m) => ({ default: m.Login })));
 const Register = lazy(() => import('./pages/Auth').then((m) => ({ default: m.Register })));
 
@@ -59,6 +63,10 @@ export function App() {
         <Route path="/problems" element={<Problems />} />
         <Route path="/problems/:slug" element={<Solve />} />
         <Route path="/leaderboard" element={<Leaderboard />} />
+        <Route path="/contests" element={<Contests />} />
+        <Route path="/contests/new" element={<Guard staff><ContestNew /></Guard>} />
+        <Route path="/contests/:slug" element={<Contest />} />
+        <Route path="/contests/:slug/:label" element={<Guard><ContestSolve /></Guard>} />
         <Route path="/dashboard" element={<Guard><Dashboard /></Guard>} />
         <Route path="/hiring" element={<Guard staff><Hiring /></Guard>} />
         <Route path="/hiring/new" element={<Guard staff><AssessmentEditor /></Guard>} />

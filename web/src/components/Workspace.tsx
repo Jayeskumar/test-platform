@@ -14,6 +14,8 @@ import { Badge, Button, Difficulty, Select, Tabs } from './ui';
 export interface WorkspaceProps {
   problem: Problem;
   attemptToken?: string;
+  /** Submissions count toward this contest. */
+  contestSlug?: string;
   /** Initial code + language (e.g. a saved test answer). */
   initial?: { language?: string | null; code?: string | null } | null;
   allowedLanguages?: string[];
@@ -116,7 +118,7 @@ export function Workspace(p: WorkspaceProps) {
   onChangeRef.current = p.onChange;
   useEffect(() => { onChangeRef.current?.(language, code); }, [language, code]);
 
-  const judge = useJudge({ attemptToken: p.attemptToken, onDone: p.onJudged });
+  const judge = useJudge({ attemptToken: p.attemptToken, contestSlug: p.contestSlug, onDone: p.onJudged });
   const [customOn, setCustomOn] = useState(false);
   const [custom, setCustom] = useState(p.problem.samples?.[0]?.input ?? '');
   const [leftTab, setLeftTab] = useState('statement');
