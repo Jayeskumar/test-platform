@@ -258,7 +258,7 @@ export function AssessmentDetail() {
           <Card className="p-5">
             <h2 className="mb-3 flex items-center gap-2 font-semibold text-ink-100"><UserPlus className="size-4 text-ember-400" /> Invite candidates</h2>
             <Label hint="one per line">Emails</Label>
-            <Textarea rows={4} value={emails} onChange={(e) => setEmails(e.target.value)} placeholder={'jane@company.com\nSam Lee <sam@example.com>'} />
+            <Textarea aria-label="Emails" rows={4} value={emails} onChange={(e) => setEmails(e.target.value)} placeholder={'jane@company.com\nSam Lee <sam@example.com>'} />
             <Button variant="primary" className="mt-3 w-full" onClick={invite} loading={inviting} disabled={!emails.trim() || d.assessment.status !== 'active'}>Create invite links</Button>
             {d.assessment.status !== 'active' && <p className="mt-2 text-xs text-amber-300">Set the assessment to active to invite candidates.</p>}
             <ErrorBox error={err} />

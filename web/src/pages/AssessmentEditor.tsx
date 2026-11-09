@@ -92,11 +92,11 @@ export function AssessmentEditor() {
       <div className="mt-4 grid gap-6 lg:grid-cols-[1fr_380px]">
         <div className="space-y-6">
           <Card className="space-y-4 p-5">
-            <div><Label>Title</Label><Input value={form.title} onChange={(e) => set({ title: e.target.value })} placeholder="e.g. Senior Backend Engineer — Take-home screen" /></div>
-            <div><Label hint="Markdown supported">Instructions for candidates</Label><Textarea rows={3} value={form.description} onChange={(e) => set({ description: e.target.value })} className="font-sans text-sm" /></div>
+            <div><Label>Title</Label><Input aria-label="Title" value={form.title} onChange={(e) => set({ title: e.target.value })} placeholder="e.g. Senior Backend Engineer — Take-home screen" /></div>
+            <div><Label hint="Markdown supported">Instructions for candidates</Label><Textarea aria-label="Instructions for candidates" rows={3} value={form.description} onChange={(e) => set({ description: e.target.value })} className="font-sans text-sm" /></div>
             <div className="grid grid-cols-2 gap-4">
-              <div><Label>Duration (minutes)</Label><Input type="number" min={5} max={600} value={form.durationMin} onChange={(e) => set({ durationMin: Number(e.target.value) })} /></div>
-              <div><Label>Status</Label><Select value={form.status} onChange={(e) => set({ status: e.target.value })}><option value="active">Active — accepting candidates</option><option value="draft">Draft</option><option value="closed">Closed</option></Select></div>
+              <div><Label>Duration (minutes)</Label><Input aria-label="Duration (minutes)" type="number" min={5} max={600} value={form.durationMin} onChange={(e) => set({ durationMin: Number(e.target.value) })} /></div>
+              <div><Label>Status</Label><Select aria-label="Status" value={form.status} onChange={(e) => set({ status: e.target.value })}><option value="active">Active — accepting candidates</option><option value="draft">Draft</option><option value="closed">Closed</option></Select></div>
             </div>
           </Card>
           <Card className="p-5">

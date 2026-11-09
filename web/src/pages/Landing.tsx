@@ -29,8 +29,8 @@ function ProductPreview() {
         <pre className="font-mono text-[10.5px] leading-relaxed text-ink-300"><span className="text-fuchsia-300">for</span> x <span className="text-fuchsia-300">in</span> nums:{'\n'}    pairs += seen[target - x]{'\n'}    seen[x] += <span className="text-amber-300">1</span></pre>
         <div className="mt-2 flex flex-wrap gap-1">
           {['Test 1', 'Test 2', 'Hidden 3', 'Hidden 4', 'Hidden 5'].map((t, i) => (
-            <span key={t} className={cx('flex items-center gap-1 rounded border border-ink-700 px-1.5 py-0.5 text-[9.5px] text-ink-300', i === 4 && 'animate-ember')}>
-              <CheckCircle2 className="size-2.5 text-emerald-400" />{t}
+            <span key={t} className="flex items-center gap-1 rounded border border-ink-700 px-1.5 py-0.5 text-[9.5px] text-ink-300">
+              <CheckCircle2 className={cx('size-2.5 text-emerald-400', i === 4 && 'animate-ember')} />{t}
             </span>
           ))}
         </div>
@@ -191,7 +191,7 @@ export function Landing() {
           <ol className="mt-10 grid gap-4 md:grid-cols-3">
             {STEPS.map((s, i) => (
               <li key={s.title} className="relative rounded-2xl border border-ink-800 bg-ink-900/60 p-6">
-                <span className="absolute top-5 right-5 font-mono text-xs text-ink-600">0{i + 1}</span>
+                <span aria-hidden="true" className="absolute top-5 right-5 font-mono text-xs text-ink-400">0{i + 1}</span>
                 <s.icon className="size-6 text-ember-400" />
                 <h3 className="mt-4 text-lg font-semibold text-ink-100">{s.title}</h3>
                 <p className="mt-2 text-sm leading-relaxed text-ink-400">{s.body}</p>

@@ -41,10 +41,10 @@ export function Login() {
     } catch (e: any) { setErr(e.message); } finally { setBusy(false); }
   };
   return (
-    <Shell title="Sign in" footer={<>New here? <Link to="/register" className="text-ember-400 hover:text-ember-300">Create an account</Link></>}>
+    <Shell title="Sign in" footer={<>New here? <Link to="/register" className="text-ember-300 underline underline-offset-2 hover:text-ember-200">Create an account</Link></>}>
       <form onSubmit={submit} className="space-y-4">
-        <div><Label>Email</Label><Input type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} /></div>
-        <div><Label>Password</Label><Input type="password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} /></div>
+        <div><Label>Email</Label><Input aria-label="Email" type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} /></div>
+        <div><Label>Password</Label><Input aria-label="Password" type="password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} /></div>
         <ErrorBox error={err} />
         <Button variant="primary" className="w-full" loading={busy} type="submit">Sign in</Button>
         <p className="text-xs text-ink-500">Demo: recruiter@crucible.dev or candidate@crucible.dev, password crucible123</p>
@@ -69,19 +69,19 @@ export function Register() {
     } catch (e: any) { setErr(e.message); } finally { setBusy(false); }
   };
   return (
-    <Shell title="Create your account" footer={<>Already have one? <Link to="/login" className="text-ember-400 hover:text-ember-300">Sign in</Link></>}>
+    <Shell title="Create your account" footer={<>Already have one? <Link to="/login" className="text-ember-300 underline underline-offset-2 hover:text-ember-200">Sign in</Link></>}>
       <form onSubmit={submit} className="space-y-4">
         <div className="grid grid-cols-2 gap-2">
           {(['candidate', 'recruiter'] as const).map((r) => (
             <button type="button" key={r} onClick={() => setForm({ ...form, role: r })} className={cx('rounded-lg border px-3 py-2 text-left text-sm', form.role === r ? 'border-ember-500/60 bg-ember-500/10 text-ink-100' : 'border-ink-700 text-ink-400 hover:border-ink-600')}>
               <div className="font-medium">{r === 'candidate' ? 'I’m practicing' : 'I’m hiring'}</div>
-              <div className="text-xs opacity-80">{r === 'candidate' ? 'Solve problems' : 'Run assessments'}</div>
+              <div className="text-xs">{r === 'candidate' ? 'Solve problems' : 'Run assessments'}</div>
             </button>
           ))}
         </div>
-        <div><Label>Name</Label><Input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} autoComplete="name" /></div>
-        <div><Label>Email</Label><Input type="email" required value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} autoComplete="email" /></div>
-        <div><Label hint="8+ characters">Password</Label><Input type="password" required minLength={8} value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} autoComplete="new-password" /></div>
+        <div><Label>Name</Label><Input aria-label="Name" required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} autoComplete="name" /></div>
+        <div><Label>Email</Label><Input aria-label="Email" type="email" required value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} autoComplete="email" /></div>
+        <div><Label hint="8+ characters">Password</Label><Input aria-label="Password" type="password" required minLength={8} value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} autoComplete="new-password" /></div>
         <ErrorBox error={err} />
         <Button variant="primary" className="w-full" loading={busy} type="submit">Create account</Button>
       </form>

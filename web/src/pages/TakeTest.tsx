@@ -90,7 +90,7 @@ function Intro({ data, token, onStarted }: { data: TakeData; token: string; onSt
         </Card>
       )}
       <div className="mt-6 space-y-4">
-        <div><Label>Your full name</Label><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="As you'd like the hiring team to see it" /></div>
+        <div><Label>Your full name</Label><Input aria-label="Your full name" value={name} onChange={(e) => setName(e.target.value)} placeholder="As you'd like the hiring team to see it" /></div>
         <label className="flex items-start gap-2 text-sm text-ink-300"><input type="checkbox" checked={agree} onChange={(e) => setAgree(e.target.checked)} className="mt-1 accent-ember-500" /> I understand what is recorded and will complete this test on my own.</label>
         <ErrorBox error={err} />
         <Button variant="primary" size="lg" onClick={start} loading={busy} disabled={!name.trim() || !agree || !checked || a.status !== 'active'}>Start the test</Button>

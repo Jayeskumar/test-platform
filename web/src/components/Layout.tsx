@@ -62,7 +62,7 @@ function UserMenu() {
   if (!user) return null;
   return (
     <div ref={ref} className="relative">
-      <button onClick={() => setOpen(!open)} aria-haspopup="menu" aria-expanded={open} aria-label="Account menu" className="grid size-8 place-items-center rounded-full bg-gradient-to-br from-ink-600 to-ink-700 text-xs font-semibold text-ink-100 ring-2 ring-transparent transition hover:ring-ember-500/40">
+      <button onClick={() => setOpen(!open)} aria-haspopup="menu" aria-expanded={open} aria-label={`${initials(user.name)} — account menu`} className="grid size-8 place-items-center rounded-full bg-gradient-to-br from-ink-600 to-ink-700 text-xs font-semibold text-ink-100 ring-2 ring-transparent transition hover:ring-ember-500/40">
         {initials(user.name)}
       </button>
       {open && (
@@ -109,9 +109,9 @@ export function TopNav() {
           {links.map((l) => <NavLink key={l.to} to={l.to} className={linkCls}>{l.label}</NavLink>)}
         </nav>
         <div className="ml-auto flex items-center gap-2">
-          <button onClick={openPalette} className="hidden h-8 items-center gap-2 rounded-lg border border-ink-700 bg-ink-900 pr-1.5 pl-2.5 text-xs text-ink-400 transition-colors hover:border-ink-600 hover:text-ink-200 sm:flex" aria-label="Search (Ctrl+K)">
+          <button onClick={openPalette} className="hidden h-8 items-center gap-2 rounded-lg border border-ink-700 bg-ink-900 pr-1.5 pl-2.5 text-xs text-ink-400 transition-colors hover:border-ink-600 hover:text-ink-200 sm:flex" title="Search (Ctrl+K)">
             <Search className="size-3.5" />
-            <span className="hidden lg:inline">Search…</span>
+            <span className="sr-only lg:not-sr-only">Search…</span>
             <kbd className="rounded border border-ink-700 bg-ink-850 px-1 font-sans text-[10px]">{isMac ? '⌘' : 'Ctrl'} K</kbd>
           </button>
           {user ? (

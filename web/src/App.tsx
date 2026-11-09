@@ -1,23 +1,26 @@
-import type { ReactNode } from 'react';
+import { lazy, type ReactNode, Suspense } from 'react';
 import { Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom';
 import { CommandPalette } from './components/CommandPalette';
 import { TopNav } from './components/Layout';
 import { PageLoader } from './components/ui';
 import { isStaff, useAuth } from './lib/auth';
-import { AssessmentDetail } from './pages/AssessmentDetail';
-import { AssessmentEditor } from './pages/AssessmentEditor';
-import { Login, Register } from './pages/Auth';
-import { CandidateReport } from './pages/CandidateReport';
-import { Compare } from './pages/Compare';
-import { Dashboard } from './pages/Dashboard';
-import { Hiring } from './pages/Hiring';
 import { Landing } from './pages/Landing';
-import { Leaderboard } from './pages/Leaderboard';
-import { Library } from './pages/Library';
-import { Problems } from './pages/Problems';
-import { QuestionEditor } from './pages/QuestionEditor';
-import { Solve } from './pages/Solve';
-import { TakeTest } from './pages/TakeTest';
+
+// Every page but the landing page is its own chunk, loaded on first visit.
+const AssessmentDetail = lazy(() => import('./pages/AssessmentDetail').then((m) => ({ default: m.AssessmentDetail })));
+const AssessmentEditor = lazy(() => import('./pages/AssessmentEditor').then((m) => ({ default: m.AssessmentEditor })));
+const CandidateReport = lazy(() => import('./pages/CandidateReport').then((m) => ({ default: m.CandidateReport })));
+const Compare = lazy(() => import('./pages/Compare').then((m) => ({ default: m.Compare })));
+const Dashboard = lazy(() => import('./pages/Dashboard').then((m) => ({ default: m.Dashboard })));
+const Hiring = lazy(() => import('./pages/Hiring').then((m) => ({ default: m.Hiring })));
+const Leaderboard = lazy(() => import('./pages/Leaderboard').then((m) => ({ default: m.Leaderboard })));
+const Library = lazy(() => import('./pages/Library').then((m) => ({ default: m.Library })));
+const Problems = lazy(() => import('./pages/Problems').then((m) => ({ default: m.Problems })));
+const QuestionEditor = lazy(() => import('./pages/QuestionEditor').then((m) => ({ default: m.QuestionEditor })));
+const Solve = lazy(() => import('./pages/Solve').then((m) => ({ default: m.Solve })));
+const TakeTest = lazy(() => import('./pages/TakeTest').then((m) => ({ default: m.TakeTest })));
+const Login = lazy(() => import('./pages/Auth').then((m) => ({ default: m.Login })));
+const Register = lazy(() => import('./pages/Auth').then((m) => ({ default: m.Register })));
 
 function NotFound() {
   return (
@@ -46,6 +49,7 @@ export function App() {
   return (
     <>
     <CommandPalette />
+    <Suspense fallback={<PageLoader />}>
     <Routes>
       <Route path="/t/:token" element={<TakeTest />} />
       <Route path="/login" element={<Login />} />
@@ -68,6 +72,7 @@ export function App() {
         <Route path="*" element={<NotFound />} />
       </Route>
     </Routes>
+    </Suspense>
     </>
   );
 }

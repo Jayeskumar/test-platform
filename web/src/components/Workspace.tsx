@@ -163,7 +163,7 @@ export function Workspace(p: WorkspaceProps) {
           <Tabs tabs={tabs} value={leftTab} onChange={setLeftTab} />
           <div className="ml-auto">{p.headerExtra}</div>
         </div>
-        <div className="min-h-0 flex-1 px-5 py-4 lg:overflow-auto">
+        <div className="min-h-0 flex-1 px-5 py-4 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ember-400 lg:overflow-auto" tabIndex={0} role="region" aria-label="Problem details">
           {leftTab === 'statement' ? (
             <>
               <h2 className="text-xl font-semibold text-ink-100">{p.problem.title}</h2>

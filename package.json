@@ -2,15 +2,25 @@
   "name": "crucible",
   "private": true,
   "version": "0.1.0",
-  "description": "Crucible — an advanced technical assessment & coding practice platform",
-  "workspaces": ["server", "web"],
+  "description": "Crucible \u2014 an advanced technical assessment & coding practice platform",
+  "workspaces": [
+    "server",
+    "web"
+  ],
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "build": "npm run build -w web && npm run build -w server",
     "start": "npm run start -w server",
     "test": "npm test -w server",
     "seed": "npm run seed -w server",
-    "typecheck": "npm run typecheck -w server && npm run typecheck -w web"
+    "typecheck": "npm run typecheck -w server && npm run typecheck -w web",
+    "e2e": "npm run build && playwright test -c e2e/playwright.config.ts"
   },
-  "engines": { "node": ">=22.13" }
+  "engines": {
+    "node": ">=22.13"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.14.0",
+    "@playwright/test": "^1.63.0"
+  }
 }
