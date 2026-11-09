@@ -1,4 +1,5 @@
 import { hashPassword } from '../auth.js';
+import { config } from '../config.js';
 import { getDb, now } from '../db/index.js';
 import { createAssessment, inviteCandidates } from '../routes/assessments.js';
 import { createQuestion } from '../routes/library.js';
@@ -22,14 +23,28 @@ function addUser(email: string, name: string, role: string) {
   ).id;
 }
 
-export async function seedIfEmpty(log = console.log) {
+/**
+ * Seeds an empty database. The question bank is always installed. Demo accounts
+ * (with a published password), practice history and the demo assessment are only
+ * installed outside production, or when SEED_DEMO=1 — never silently in production.
+ */
+export async function seedIfEmpty(log = console.log, opts: { demo?: boolean } = {}) {
   const db = getDb();
-  if (db.get<any>('SELECT COUNT(*) AS n FROM users').n > 0) return false;
+  if (db.get<any>('SELECT COUNT(*) AS n FROM questions').n > 0 || db.get<any>('SELECT COUNT(*) AS n FROM users').n > 0) return false;
+  const demo = opts.demo ?? (process.env.SEED_DEMO ? process.env.SEED_DEMO === '1' : !config.isProd);
   const t0 = Date.now();
-  log('[seed] empty database — installing demo content');
+  log(`[seed] empty database — installing the question bank${demo ? ' and demo content' : ''}`);
   const ids: Record<string, number> = {};
-  for (const a of DEMO_ACCOUNTS) ids[a.email] = addUser(a.email, a.name, a.role);
-  const recruiter = ids['recruiter@crucible.dev'];
+  if (demo) for (const a of DEMO_ACCOUNTS) ids[a.email] = addUser(a.email, a.name, a.role);
+  if (process.env.ADMIN_EMAIL && process.env.ADMIN_PASSWORD) {
+    if (process.env.ADMIN_PASSWORD.length < 12) throw new Error('ADMIN_PASSWORD must be at least 12 characters.');
+    db.run(
+      'INSERT INTO users (email, name, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(email) DO NOTHING',
+      process.env.ADMIN_EMAIL.toLowerCase(), 'Administrator', hashPassword(process.env.ADMIN_PASSWORD), 'admin', now(),
+    );
+    log(`[seed] admin account ${process.env.ADMIN_EMAIL} created`);
+  }
+  const recruiter = ids['recruiter@crucible.dev'] ?? null;
 
   // Questions: expected outputs are produced by running each reference solution in the judge.
   const qid: Record<string, number> = {};
@@ -46,6 +61,7 @@ export async function seedIfEmpty(log = console.log) {
     }),
   );
   log(`[seed] ${PROBLEMS.length} questions ready (${Date.now() - t0} ms)`);
+  if (!demo || recruiter == null) return true;
 
   // Practice history so the leaderboard and dashboards are not empty.
   const practice = PROBLEMS.filter((p) => p.visibility === 'public' && p.type !== 'mcq');

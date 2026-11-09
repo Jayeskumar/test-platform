@@ -178,7 +178,7 @@ int main() {
   },
   {
     id: 'java',
-    name: 'Java 21',
+    name: 'Java',
     file: 'Main.java',
     editor: 'java',
     compile: () => [T(tools.javac, 'javac'), '-J-Xmx512m', '-J-XX:+UseSerialGC', '-J-XX:-UsePerfData', '-encoding', 'UTF-8', 'Main.java'],

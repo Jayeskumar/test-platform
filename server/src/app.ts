@@ -40,10 +40,18 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
   await app.register(takeRoutes);
 
   if (fs.existsSync(path.join(config.webDist, 'index.html'))) {
-    await app.register(fastifyStatic, { root: config.webDist, wildcard: false });
+    // Serve files dynamically (a rebuilt client must not require a restart) with
+    // long-lived caching for content-hashed assets and revalidation for the shell.
+    await app.register(fastifyStatic, {
+      root: config.webDist,
+      setHeaders: (res, filePath) => {
+        res.header('Cache-Control', filePath.includes(`${path.sep}assets${path.sep}`) ? 'public, max-age=31536000, immutable' : 'no-cache');
+      },
+    });
     app.setNotFoundHandler((req, reply) => {
       if (req.url.startsWith('/api/')) return reply.status(404).send({ error: 'Not found' });
-      return reply.type('text/html').sendFile('index.html');
+      if ((req.method !== 'GET' && req.method !== 'HEAD') || /\.[a-z0-9]+$/i.test(req.url.split('?')[0])) return reply.status(404).send('Not found');
+      return reply.header('Cache-Control', 'no-cache').type('text/html').sendFile('index.html');
     });
   }
   return app;

@@ -97,7 +97,7 @@ const EventsBody = z.object({
   events: z.array(z.object({
     type: z.enum(['tab_hidden', 'tab_visible', 'blur', 'focus', 'paste', 'copy', 'fullscreen_exit', 'fullscreen_enter', 'question_view', 'run']),
     questionId: z.number().int().nullish(),
-    detail: z.record(z.any()).optional(),
+    detail: z.record(z.string(), z.any()).optional(),
     t: z.number().optional(),
   })).max(200),
 });

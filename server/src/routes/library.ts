@@ -21,7 +21,7 @@ const QuestionBody = z.object({
   tags: z.array(z.string().trim().min(1).max(30)).max(10).default([]),
   statement: z.string().min(1).max(50_000),
   visibility: z.enum(['public', 'private']).default('private'),
-  data: z.record(z.any()).default({}),
+  data: z.record(z.string(), z.any()).default({}),
   tests: z.array(TestCase).max(200).default([]),
 });
 

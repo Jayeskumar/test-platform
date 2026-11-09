@@ -1,0 +1,29 @@
+services:
+  crucible:
+    build: .
+    ports:
+      - "4000:4000"
+    volumes:
+      - crucible-data:/data
+    environment:
+      JUDGE_WORKERS: "4"
+      # Set to enable AI code reviews in candidate reports.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # Cookies are marked Secure in production; set to 1 only when serving over plain HTTP locally.
+      INSECURE_COOKIES: "1"
+      # Demo accounts use a published password: only enable for evaluation, never in production.
+      SEED_DEMO: ${SEED_DEMO:-0}
+      # First administrator account (created when the database is empty).
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+    # The sandbox creates network and mount namespaces for every run.
+    # Without these, the judge still enforces limits but reports isolation as off.
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - seccomp:unconfined
+      - apparmor:unconfined
+    restart: unless-stopped
+
+volumes:
+  crucible-data:

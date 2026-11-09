@@ -20,10 +20,10 @@ const AssessmentBody = z.object({
       requireFullscreen: z.boolean().default(false),
       detectPaste: z.boolean().default(true),
       recordPlayback: z.boolean().default(true),
-    }).default({}),
+    }).prefault({}),
     showScoreToCandidate: z.boolean().default(false),
     shuffleQuestions: z.boolean().default(false),
-  }).default({}),
+  }).prefault({}),
   questions: z.array(z.object({ questionId: z.number().int(), points: z.number().int().min(1).max(1000) })).min(1).max(30),
 });
 

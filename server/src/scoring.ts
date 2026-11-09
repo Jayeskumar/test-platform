@@ -143,7 +143,8 @@ export function computeIntegrity(attemptId: number, plagiarism?: ReturnType<type
   const matches = plag.map((m) => ({ ...m, copied: copyEvidence.has(m.questionId) }));
   let plagPenalty = 0;
   for (const m of matches) {
-    plagPenalty += m.copied ? Math.round(25 + (m.similarity - 0.7) * 50) : m.reference ? 15 : 5;
+    // Typed-up code that matches a known solution is common for canonical problems: informational only.
+    plagPenalty += m.copied ? Math.round(25 + (m.similarity - 0.7) * 50) : m.reference ? 0 : 5;
   }
   score -= Math.min(60, plagPenalty);
   score = Math.max(0, Math.round(score));
@@ -155,7 +156,9 @@ export function computeIntegrity(attemptId: number, plagiarism?: ReturnType<type
   if (burstEdits) flags.push(`${burstEdits} sudden code insertion${burstEdits > 1 ? 's' : ''} without typing`);
   for (const m of matches) {
     const other = m.a === `attempt:${attemptId}` ? m.bLabel : m.aLabel;
-    const how = m.copied ? ' — code arrived by paste' : ' — typed incrementally here, may be the original';
+    const how = m.copied
+      ? ' — code arrived by paste'
+      : m.reference ? ' — typed incrementally (canonical approach; informational)' : ' — typed incrementally here, may be the original';
     flags.push(`${Math.round(m.similarity * 100)}% similar to ${other} on “${m.questionTitle}”${how}`);
   }
   return {

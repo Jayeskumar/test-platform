@@ -89,9 +89,19 @@ export interface PlagiarismMatch {
 /** Minimum token count for a comparison to be meaningful. */
 const MIN_TOKENS = 25;
 
+/**
+ * Short programs collide more often by chance (there are only so many ways to
+ * write a ten-line loop), so the bar rises as the shorter document shrinks.
+ */
+export function thresholdFor(minTokens: number, base = 0.7): number {
+  if (minTokens >= 150) return base;
+  return Math.min(0.95, base + ((150 - minTokens) / 125) * 0.2);
+}
+
 export function findMatches(docs: PlagiarismDoc[], threshold = 0.7): PlagiarismMatch[] {
   const prepared = docs
-    .filter((d) => normalizeTokens(d.code).length >= MIN_TOKENS)
+    .map((d) => ({ ...d, len: normalizeTokens(d.code).length }))
+    .filter((d) => d.len >= MIN_TOKENS)
     .map((d) => ({ ...d, fp: fingerprints(d.code) }));
   const out: PlagiarismMatch[] = [];
   for (let i = 0; i < prepared.length; i++) {
@@ -100,7 +110,7 @@ export function findMatches(docs: PlagiarismDoc[], threshold = 0.7): PlagiarismM
       const b = prepared[j];
       if (a.reference && b.reference) continue;
       const s = similarity(a.fp, b.fp);
-      if (s >= threshold) {
+      if (s >= thresholdFor(Math.min(a.len, b.len), threshold)) {
         out.push({ a: a.id, b: b.id, aLabel: a.label, bLabel: b.label, similarity: Math.round(s * 100) / 100, reference: !!(a.reference || b.reference) });
       }
     }
