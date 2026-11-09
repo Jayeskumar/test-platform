@@ -33,6 +33,7 @@ export function QuestionEditor() {
   const [err, setErr] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [preview, setPreview] = useState<'edit' | 'preview'>('edit');
+  const [edPreview, setEdPreview] = useState<'edit' | 'preview'>('edit');
   const [validation, setValidation] = useState<any>(null);
   const [validating, setValidating] = useState(false);
 
@@ -166,6 +167,32 @@ export function QuestionEditor() {
           )}
         </Card>
       </div>
+
+      {f.type !== 'mcq' && (
+        <Card className="mt-4 space-y-4 p-5">
+          <div>
+            <h2 className="font-semibold text-ink-100">Learning</h2>
+            <p className="text-xs text-ink-400">Shown in practice only — never during assessments or live contests. Hints are revealed one at a time; the editorial opens after an accepted solution or three attempts.</p>
+          </div>
+          <div className="space-y-2">
+            <Label hint="from a gentle nudge to the key idea">Hints</Label>
+            {(f.data.hints ?? []).map((h: string, i: number) => (
+              <div key={i} className="flex items-start gap-2">
+                <span className="mt-2.5 w-5 text-right text-xs text-ink-400 tabular-nums">{i + 1}</span>
+                <Textarea aria-label={`Hint ${i + 1}`} rows={2} value={h} onChange={(e) => setData({ hints: f.data.hints.map((x: string, k: number) => (k === i ? e.target.value : x)) })} className="font-sans text-sm" />
+                <button onClick={() => setData({ hints: f.data.hints.filter((_: string, k: number) => k !== i) })} className="mt-2 p-1 text-ink-500 hover:text-rose-300" aria-label={`Remove hint ${i + 1}`}><Trash2 className="size-4" /></button>
+              </div>
+            ))}
+            {(f.data.hints ?? []).length < 10 && <Button size="sm" onClick={() => setData({ hints: [...(f.data.hints ?? []), ''] })}><Plus className="size-3.5" /> Add hint</Button>}
+          </div>
+          <div>
+            <div className="mb-1.5 flex items-center justify-between"><Label>Editorial (Markdown)</Label><Tabs value={edPreview} onChange={setEdPreview} tabs={[{ id: 'edit', label: 'Write' }, { id: 'preview', label: 'Preview' }]} /></div>
+            {edPreview === 'edit'
+              ? <Textarea aria-label="Editorial" rows={8} value={f.data.editorial ?? ''} onChange={(e) => setData({ editorial: e.target.value })} placeholder={'### Approach\n…\n\n### Complexity\n…'} />
+              : <div className="min-h-32 rounded-lg border border-ink-800 p-4"><Markdown>{f.data.editorial || '_Nothing yet._'}</Markdown></div>}
+          </div>
+        </Card>
+      )}
 
       {f.type !== 'mcq' && (
         <Card className="mt-4 p-5">

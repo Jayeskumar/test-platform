@@ -6,6 +6,7 @@ import { presentSubmission, presentTestEvent, publicQuestion } from '../question
 import { gradeMcq } from '../scoring.js';
 import { getService, type JudgeEvent, type QuestionRow } from '../service.js';
 import { contestForSubmission } from './contests.js';
+import { learnSummary } from './learn.js';
 import { activeAttemptByToken, attemptHasQuestion } from './take.js';
 
 const DIFF_POINTS: Record<string, number> = { easy: 10, medium: 25, hard: 50 };
@@ -68,7 +69,7 @@ export async function practiceRoutes(app: FastifyInstance) {
     const { slug } = req.params as { slug: string };
     const q = getDb().get<QuestionRow>("SELECT * FROM questions WHERE slug = ? AND visibility = 'public'", slug);
     if (!q) throw new HttpError(404, 'Problem not found.');
-    return { problem: publicQuestion(q) };
+    return { problem: { ...publicQuestion(q), learn: q.type === 'mcq' ? null : learnSummary(q) } };
   });
 
   app.post('/api/problems/:slug/answer', async (req) => {

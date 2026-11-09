@@ -27,6 +27,12 @@ const QuestionBody = z.object({
 
 type QuestionInput = z.infer<typeof QuestionBody>;
 
+/** Practice-only learning material on coding and SQL questions. */
+const Learn = z.object({
+  hints: z.array(z.string().trim().max(2000)).max(10, 'at most 10 hints').default([]).transform((h) => h.filter(Boolean)),
+  editorial: z.string().max(50_000).default(''),
+});
+
 const slugify = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || 'question';
 
 /** Fill in missing expected outputs from the reference solution and validate type-specific data. */
@@ -39,6 +45,10 @@ async function prepare(q: QuestionInput): Promise<QuestionInput> {
     if (!correct.length || !correct.every((c) => opts.some((o) => o.id === c))) throw new HttpError(400, 'Mark at least one correct option.');
     return { ...q, tests: [] };
   }
+  const learn = Learn.safeParse({ hints: q.data.hints, editorial: q.data.editorial });
+  if (!learn.success) throw new HttpError(400, `Hints and editorial: ${learn.error.issues[0].message}`);
+  q.data.hints = learn.data.hints;
+  q.data.editorial = learn.data.editorial;
   if (!q.tests.length) throw new HttpError(400, 'Add at least one test case.');
   if (!q.tests.some((t) => t.is_sample)) q.tests[0].is_sample = true;
   if (q.type === 'sql') {

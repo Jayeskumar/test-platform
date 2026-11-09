@@ -1,3 +1,4 @@
+import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from '@playwright/test';
 import { collectErrors, loginAs, typeCode } from './helpers';
 
@@ -76,4 +77,35 @@ test('command palette and theme persist', async ({ page }) => {
   await page.getByRole('radio', { name: 'Light' }).first().click();
   await page.reload();
   await expect(page.locator('html')).not.toHaveClass(/dark/);
+});
+
+test('learning: progressive hints, locked editorial', async ({ context, page }) => {
+  const errors = collectErrors(page);
+  const r = await context.request.post('/api/auth/register', { data: { email: `learner${Date.now()}@example.com`, name: 'Lee Learner', password: 'password123' } });
+  expect(r.ok()).toBeTruthy();
+  await page.goto('/problems/count-islands');
+  await page.getByRole('tab', { name: /Hints · 0\/3/ }).click();
+  await page.getByRole('button', { name: 'Reveal hint 1' }).click();
+  await expect(page.getByText('Each island is a connected component')).toBeVisible();
+  await expect(page.getByRole('tab', { name: /Hints · 1\/3/ })).toBeVisible();
+  await page.getByRole('tab', { name: 'Editorial' }).click();
+  await expect(page.getByText('The editorial is locked')).toBeVisible();
+  await expect(page.getByText(/after 3 more submissions/)).toBeVisible();
+  const ax = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze();
+  expect(ax.violations.map((v) => v.id)).toEqual([]);
+  expect(errors).toEqual([]);
+});
+
+test('contests: live standings and a problem inside the contest', async ({ context, page }) => {
+  const errors = collectErrors(page);
+  await loginAs(context, 'candidate');
+  await page.goto('/contests');
+  await page.getByRole('link', { name: /Weekly Sprint #42/ }).first().click();
+  await expect(page.getByRole('heading', { name: 'Weekly Sprint #42' })).toBeVisible();
+  await page.getByRole('tab', { name: 'Standings' }).click();
+  await expect(page.getByRole('table')).toBeVisible();
+  await page.goto('/contests/weekly-sprint-42/A');
+  await expect(page.locator('.cm-content')).toBeVisible();
+  await expect(page.getByRole('tab', { name: /Hints/ })).toHaveCount(0);
+  expect(errors).toEqual([]);
 });

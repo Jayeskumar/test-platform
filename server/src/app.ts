@@ -9,6 +9,7 @@ import { config } from './config.js';
 import { assessmentRoutes } from './routes/assessments.js';
 import { authRoutes } from './routes/auth.js';
 import { contestRoutes } from './routes/contests.js';
+import { learnRoutes } from './routes/learn.js';
 import { libraryRoutes } from './routes/library.js';
 import { practiceRoutes } from './routes/practice.js';
 import { takeRoutes } from './routes/take.js';
@@ -40,6 +41,7 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
   await app.register(assessmentRoutes);
   await app.register(takeRoutes);
   await app.register(contestRoutes);
+  await app.register(learnRoutes);
 
   if (fs.existsSync(path.join(config.webDist, 'index.html'))) {
     // Serve files dynamically (a rebuilt client must not require a restart) with

@@ -44,6 +44,8 @@ export interface Problem {
   ordered?: boolean;
   options?: { id: string; text: string }[];
   multiple?: boolean;
+  /** Practice only: how much learning help exists. */
+  learn?: { hints: number; editorial: boolean } | null;
 }
 
 export interface TestResult {

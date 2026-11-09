@@ -3,9 +3,9 @@ import { expect, test } from '@playwright/test';
 import { loginAs, setTheme } from './helpers';
 
 const PAGES: { role: 'recruiter' | 'candidate' | null; paths: string[] }[] = [
-  { role: null, paths: ['/', '/problems', '/leaderboard', '/login', '/register'] },
-  { role: 'candidate', paths: ['/dashboard', '/problems/pair-sum-count', '/problems/where-vs-having'] },
-  { role: 'recruiter', paths: ['/hiring', '/hiring/1', '/hiring/attempts/1', '/hiring/1/compare?ids=1,2', '/library', '/library/1', '/hiring/new'] },
+  { role: null, paths: ['/', '/problems', '/leaderboard', '/login', '/register', '/contests', '/contests/weekly-sprint-42', '/contests/opening-round'] },
+  { role: 'candidate', paths: ['/dashboard', '/problems/pair-sum-count', '/problems/where-vs-having', '/contests/weekly-sprint-42/A'] },
+  { role: 'recruiter', paths: ['/hiring', '/hiring/1', '/hiring/attempts/1', '/hiring/1/compare?ids=1,2', '/library', '/library/1', '/hiring/new', '/contests/new'] },
 ];
 
 for (const theme of ['light', 'dark'] as const) {

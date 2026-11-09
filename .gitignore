@@ -11,3 +11,4 @@ playwright-report/
 scratch/
 web/public/mediapipe/wasm/
 e2e/.data/
+server/shots/

@@ -6,6 +6,7 @@ import { createContest } from '../routes/contests.js';
 import { createQuestion } from '../routes/library.js';
 import { finalizeAttempt } from '../routes/take.js';
 import { DEMO_CANDIDATES } from './candidates.js';
+import { EDITORIALS } from './editorials.js';
 import { PROBLEMS } from './problems.js';
 
 export const DEMO_PASSWORD = 'crucible123';
@@ -29,9 +30,27 @@ function addUser(email: string, name: string, role: string) {
  * (with a published password), practice history and the demo assessment are only
  * installed outside production, or when SEED_DEMO=1 — never silently in production.
  */
+/** Databases seeded before hints existed: add them to built-in questions that have none yet. */
+export function backfillEditorials(log = console.log) {
+  const db = getDb();
+  let n = 0;
+  for (const [slug, ed] of Object.entries(EDITORIALS)) {
+    const q = db.get<any>('SELECT id, data FROM questions WHERE slug = ?', slug);
+    if (!q) continue;
+    const data = JSON.parse(q.data || '{}');
+    if ('hints' in data || 'editorial' in data) continue;
+    db.run('UPDATE questions SET data = ? WHERE id = ?', JSON.stringify({ ...data, ...ed }), q.id);
+    n++;
+  }
+  if (n) log(`[seed] added hints and editorials to ${n} built-in questions`);
+}
+
 export async function seedIfEmpty(log = console.log, opts: { demo?: boolean } = {}) {
   const db = getDb();
-  if (db.get<any>('SELECT COUNT(*) AS n FROM questions').n > 0 || db.get<any>('SELECT COUNT(*) AS n FROM users').n > 0) return false;
+  if (db.get<any>('SELECT COUNT(*) AS n FROM questions').n > 0 || db.get<any>('SELECT COUNT(*) AS n FROM users').n > 0) {
+    backfillEditorials(log);
+    return false;
+  }
   const demo = opts.demo ?? (process.env.SEED_DEMO ? process.env.SEED_DEMO === '1' : !config.isProd);
   const t0 = Date.now();
   log(`[seed] empty database — installing the question bank${demo ? ' and demo content' : ''}`);
@@ -54,7 +73,7 @@ export async function seedIfEmpty(log = console.log, opts: { demo?: boolean } = 
       qid[p.slug] = await createQuestion(
         {
           slug: p.slug, type: p.type, title: p.title, difficulty: p.difficulty, tags: p.tags, statement: p.statement,
-          visibility: p.visibility, data: p.data,
+          visibility: p.visibility, data: { ...p.data, ...(EDITORIALS[p.slug] ?? {}) },
           tests: p.tests.map((t) => ({ input: t.input, expected: t.expected ?? '', is_sample: !!t.sample, weight: t.weight ?? 1, explanation: t.explanation ?? '' })),
         },
         recruiter,

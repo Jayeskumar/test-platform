@@ -20,8 +20,12 @@
 | **Fair integrity scoring** | Tab switches, fullscreen exits and large pastes feed an integrity score. When two candidates match, authorship evidence (paste or burst versus steady typing) decides who is penalized. |
 | **AI review** *(optional)* | With `ANTHROPIC_API_KEY` set, Claude writes a structured review per attempt: correctness, efficiency, code quality, strengths, concerns and follow-up interview questions. |
 | **Practice mode** | Problem list with filters, submission history, points, global rank, streaks, an activity heatmap and a skill radar. |
+| **Hints and editorials** | Every built-in problem has 3 progressive hints (nudge → key idea) and an editorial with approach, complexity, pitfalls and the reference solution. Hints are revealed one at a time; the editorial opens after an accepted solution or 3 attempts. Both are withheld during live contests and from candidates taking an assessment that contains the question. |
+| **Contests** | Scheduled rounds with ICPC scoring (solved, then penalty minutes + 20 per rejected attempt), first-to-solve markers, a scoreboard freeze for the last N minutes, and standings that update live over SSE. Staff create contests from the question library. |
+| **Team hiring** | Share an assessment with colleagues as **editor** (can change it and invite) or **reviewer** (read-only). Reviewers mark each integrity flag *explained* or *concern* with a note; the report shows how many flags are reviewed. |
 | **Reviewer workflow** | A "needs your review" queue, candidate search, filters and sorting, side-by-side comparison of up to 4 candidates, Advance / Hold / Reject decisions with notes, CSV export, and print-ready reports (save as PDF). |
 | **Polished UI** | Light, dark and system themes with an editor that matches; a Ctrl/⌘+K command palette; an IDE with test-case and result tabs, adjustable font size, focus mode and remembered layout; mobile navigation; toasts and skeleton loaders. |
+| **Fast and accessible** | Routes and editor language grammars load on demand (landing page JS went from 1,075 KB to 255 KB). Every main page passes an automated WCAG 2.1 AA audit (axe-core) in both themes. |
 
 See [`docs/PRODUCT.md`](docs/PRODUCT.md) for the product brief and roadmap.
 
@@ -30,6 +34,8 @@ See [`docs/PRODUCT.md`](docs/PRODUCT.md) for the product brief and roadmap.
 | ![Hiring dashboard](docs/screenshots/hiring-dashboard.png) | ![Compare candidates](docs/screenshots/compare.png) |
 | **Candidate report with decision** | **IDE (light theme)** |
 | ![Candidate report](docs/screenshots/candidate-report.png) | ![IDE](docs/screenshots/ide-live-judging.png) |
+| **Live contest standings** | **Hints and editorial** |
+| ![Contest](docs/screenshots/contest.png) | ![Editorial](docs/screenshots/editorial.png) |
 
 ---
 
@@ -159,7 +165,8 @@ Everything is configured per assessment, and the candidate's intro page lists ex
 ## Testing
 
 ```bash
-npm test            # 79 tests, about 2.5 minutes
+npm test            # 90 tests, about 3 minutes
+npm run e2e         # 13 browser tests: user flows + WCAG 2.1 AA audits (Playwright)
 npm run typecheck
 ```
 
@@ -169,6 +176,8 @@ npm run typecheck
 | `judge.test.ts` | Accepted solutions in every available language; WA with weighted partial credit; CE, RE and TLE; custom input; custom checkers; full-length expected outputs; SQL (including blocked `ATTACH`); complexity, checker and plagiarism units |
 | `problems.test.ts` | Every built-in problem's reference solution passes, **and an independently written solution in another language agrees on all of its tests** |
 | `api.test.ts` | Auth; practice run and submit; **hidden tests never leak to candidates**; candidates can't reach staff APIs; recruiters can't see each other's candidates; tokens are scoped to attempts; the full assessment flow; deadline expiry; question validation |
+| `contests.test.ts` | ICPC ranking, penalties, first-to-solve and ties; scoreboard freeze for participants but not organizers; submissions only while running and only for contest problems; problems hidden until the start; only staff create contests |
+| `learn.test.ts` | Hints revealed strictly in order and remembered; editorial unlocks (accepted, 3 attempts, staff); nothing leaks on the problem page; withheld during a live contest; validation; backfill of older databases |
 | `proctoring.test.ts` | Pool draws (count, determinism, variety, scoring, validation); media accepted only when enabled; forged or oversized images rejected; rate limits; identity required to start; image access control; device lock, unlock and refused-device logging; device-switch logging; shared browser vs shared network; lockdown signals; retention deletion |
 
 The webcam flow was also verified in Chromium with a fake camera fed a public-domain portrait (one face), two copies side by side (two faces) and a blank frame (no face).
@@ -184,14 +193,16 @@ server/
   sandbox/runner.c          sandbox supervisor (built automatically at start-up)
   src/judge/                languages, sandbox pool, judge, checkers, complexity analyzer
   src/integrity/            winnowing plagiarism detector
-  src/routes/               auth, practice, library, assessments, test-taking
+  src/routes/               auth, practice, library, assessments, test-taking, contests, learn
+  src/contests.ts           ICPC standings, freeze
   src/scoring.ts            attempt scoring + integrity report
   src/ai.ts                 optional Claude review (structured output)
-  src/seed/                 problem set, demo candidates
+  src/seed/                 problem set, hints and editorials, demo candidates and contests
   test/                     node:test suites
 web/
   src/pages/                Landing, Problems, Solve, Dashboard, Hiring, Report, Library, TakeTest…
   src/components/           Workspace (IDE), ResultsPanel (live), Playback, charts
+e2e/                        Playwright smoke flows + axe accessibility audits
 docs/PRODUCT.md             product brief, personas, roadmap
 ```
 
@@ -201,7 +212,9 @@ docs/PRODUCT.md             product brief, personas, roadmap
 |---|---|
 | Auth | `POST /api/auth/register · login · logout`, `GET /api/auth/me`, `GET /api/meta` |
 | Practice | `GET /api/problems`, `GET /api/problems/:slug`, `POST /api/problems/:slug/answer`, `GET /api/me/stats`, `GET /api/leaderboard` |
+| Learning | `GET /api/problems/:slug/learn`, `POST /api/problems/:slug/hints/:n`, `GET /api/problems/:slug/editorial` |
+| Contests | `GET /api/contests`, `GET /api/contests/:slug`, `POST …/join`, `GET …/problems/:label`, `GET …/submissions`, `GET …/standings`, `GET …/standings/stream` (SSE), `POST /api/contests` *(staff)* |
 | Judging | `POST /api/submissions`, `GET /api/submissions/:id`, `GET /api/submissions/:id/stream` (SSE) |
 | Library *(staff)* | `GET/POST /api/library/questions`, `GET/PUT/DELETE /api/library/questions/:id`, `POST …/:id/validate`, `POST /api/library/run-reference` |
-| Assessments *(staff)* | `GET/POST /api/assessments`, `GET/PUT /api/assessments/:id`, `POST …/:id/invites`, `GET …/:id/plagiarism`, `GET /api/attempts/:id`, `POST /api/attempts/:id/ai-review` |
+| Assessments *(staff)* | `GET/POST /api/assessments`, `GET/PUT /api/assessments/:id`, `POST …/:id/invites`, `GET …/:id/plagiarism`, `GET /api/attempts/:id`, `POST /api/attempts/:id/ai-review`, `GET/POST …/:id/members`, `PUT /api/attempts/:id/flags`, `PUT /api/attempts/:id/review` |
 | Test-taking *(token)* | `GET /api/take/:token`, `POST …/start`, `PUT …/answers/:questionId`, `POST …/events`, `POST …/submit` |

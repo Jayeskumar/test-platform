@@ -1,6 +1,7 @@
 import { ArrowLeft, CheckCircle2, ChevronLeft, ChevronRight, List, XCircle } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { EditorialPanel, HintsPanel, useLearn } from '../components/LearnPanels';
 import { Markdown } from '../components/Markdown';
 import { Badge, Button, Difficulty, ErrorBox, PageLoader, VerdictBadge } from '../components/ui';
 import { Workspace } from '../components/Workspace';
@@ -103,6 +104,7 @@ export function Solve() {
   const [problem, setProblem] = useState<Problem | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [refresh, setRefresh] = useState(0);
+  const [learn, setLearn] = useLearn(slug!, refresh);
   useEffect(() => {
     setProblem(null);
     api.get<{ problem: Problem }>(`/api/problems/${slug}`).then((r) => setProblem(r.problem)).catch((e) => setErr(e.message));
@@ -118,7 +120,11 @@ export function Solve() {
         storageKey={`practice:${problem.slug}`}
         onJudged={(s) => s.kind === 'submit' && setRefresh((x) => x + 1)}
         headerExtra={<ProblemNav slug={problem.slug} />}
-        sideTabs={[{ id: 'history', label: 'Submissions', render: () => <History slug={problem.slug} refresh={refresh} /> }]}
+        sideTabs={[
+          ...(problem.learn?.hints ? [{ id: 'hints', label: `Hints · ${learn?.hints.length ?? 0}/${problem.learn.hints}`, render: () => <HintsPanel slug={problem.slug} state={learn} onChange={setLearn} /> }] : []),
+          ...(problem.learn?.editorial ? [{ id: 'editorial', label: 'Editorial', render: () => <EditorialPanel slug={problem.slug} state={learn} refresh={refresh} /> }] : []),
+          { id: 'history', label: 'Submissions', render: () => <History slug={problem.slug} refresh={refresh} /> },
+        ]}
       />
     </div>
   );

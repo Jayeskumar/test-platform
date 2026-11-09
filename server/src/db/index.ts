@@ -238,6 +238,16 @@ const MIGRATIONS: string[] = [
     PRIMARY KEY (attempt_id, flag_key)
   );
   `,
+  // 5 — learning: which hints each learner has revealed (practice only)
+  `
+  CREATE TABLE IF NOT EXISTS hint_views (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    question_id INTEGER NOT NULL REFERENCES questions(id) ON DELETE CASCADE,
+    n INTEGER NOT NULL,
+    viewed_at INTEGER NOT NULL,
+    PRIMARY KEY (user_id, question_id, n)
+  );
+  `,
 ];
 
 function migrate(db: DatabaseSync) {
