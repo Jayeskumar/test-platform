@@ -249,6 +249,7 @@ export class Judge {
     cx: ComplexitySpec & { cacheKey: string },
   ): Promise<ComplexityReport> {
     const points: ComplexityPoint[] = [];
+    const inputBytes: { n: number; bytes: number }[] = [];
     const sizes = [...cx.sizes].sort((a, b) => a - b);
     const budget = { ...spec, cpuMs: Math.max(spec.cpuMs, 4000), wallMs: Math.max(spec.wallMs, 9000) };
     for (const n of sizes) {
@@ -256,6 +257,7 @@ export class Judge {
       if (!input) {
         return { ...estimateComplexity(points, cx.expected), note: 'The input generator failed for this problem.' };
       }
+      inputBytes.push({ n, bytes: fs.statSync(input).size });
       let best: RunResult | null = null;
       // Take the faster of two runs to reduce scheduling noise on small inputs.
       for (let rep = 0; rep < 2; rep++) {
@@ -268,7 +270,11 @@ export class Judge {
       points.push({ n, cpuMs: best!.cpu_ms, status: best!.status });
       if (best!.status !== 'OK') break;
     }
-    return estimateComplexity(points, cx.expected);
+    // Does the input itself grow (at least roughly) linearly with n?
+    const first = inputBytes[0];
+    const last = inputBytes[inputBytes.length - 1];
+    const linearInput = !!first && !!last && last.n > first.n && last.bytes / first.bytes >= 0.5 * (last.n / first.n);
+    return estimateComplexity(points, cx.expected, { linearInput });
   }
 
   async judgeSql(req: SqlJudgeRequest, ev: JudgeEvents = {}): Promise<JudgeOutcome> {

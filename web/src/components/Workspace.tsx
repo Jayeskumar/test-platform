@@ -1,4 +1,4 @@
-import { Lightbulb, Play, RotateCcw, Send } from 'lucide-react';
+import { AArrowDown, AArrowUp, Keyboard, Lightbulb, ListTree, Maximize2, Minimize2, Play, RotateCcw, Send, Terminal } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../lib/auth';
 import { cx, mem, ms } from '../lib/format';
@@ -32,23 +32,47 @@ export interface WorkspaceProps {
   sideTabs?: { id: string; label: string; render: () => ReactNode }[];
 }
 
-function useResizable(initial: number, min: number, max: number, axis: 'x' | 'y') {
-  const [size, setSize] = useState(initial);
+function stored<T>(key: string, fallback: T): T {
+  try {
+    const v = localStorage.getItem(key);
+    return v == null ? fallback : (JSON.parse(v) as T);
+  } catch {
+    return fallback;
+  }
+}
+function store(key: string, v: unknown) {
+  try { localStorage.setItem(key, JSON.stringify(v)); } catch { /* private mode */ }
+}
+
+/** A draggable split, remembered across visits. */
+function useResizable(key: string, initial: number, min: number, max: number, axis: 'x' | 'y') {
+  const [size, setSize] = useState(() => Math.min(max, Math.max(min, stored(key, initial))));
   const start = useCallback((e: React.PointerEvent) => {
     e.preventDefault();
     const origin = axis === 'x' ? e.clientX : e.clientY;
     const startSize = size;
+    let last = size;
     const move = (ev: PointerEvent) => {
       const d = (axis === 'x' ? ev.clientX : ev.clientY) - origin;
       const total = axis === 'x' ? window.innerWidth : window.innerHeight;
-      setSize(Math.min(max, Math.max(min, startSize + (d / total) * 100 * (axis === 'y' ? -1 : 1))));
+      last = Math.min(max, Math.max(min, startSize + (d / total) * 100 * (axis === 'y' ? -1 : 1)));
+      setSize(last);
     };
-    const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
+    const up = () => { store(key, last); window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
-  }, [size, min, max, axis]);
+  }, [size, min, max, axis, key]);
   return [size, start] as const;
 }
+
+const SHORTCUTS: [string, string][] = [
+  ['Ctrl/⌘ + Enter', 'Run on sample tests'],
+  ['Ctrl/⌘ + Shift + Enter', 'Submit for judging'],
+  ['Ctrl/⌘ + K', 'Search problems & pages'],
+  ['Ctrl/⌘ + /', 'Toggle line comment'],
+  ['Alt + ↑ / ↓', 'Move line up / down'],
+  ['Ctrl/⌘ + F', 'Find in code'],
+];
 
 export function Workspace(p: WorkspaceProps) {
   const { meta } = useAuth();
@@ -96,10 +120,20 @@ export function Workspace(p: WorkspaceProps) {
   const [customOn, setCustomOn] = useState(false);
   const [custom, setCustom] = useState(p.problem.samples?.[0]?.input ?? '');
   const [leftTab, setLeftTab] = useState('statement');
-  const [split, startSplit] = useResizable(42, 25, 70, 'x');
-  const [consoleH, startConsole] = useResizable(38, 15, 75, 'y');
+  const [split, startSplit] = useResizable('crucible:split', 42, 25, 70, 'x');
+  const [consoleH, startConsole] = useResizable('crucible:console', 38, 15, 75, 'y');
+  const [consoleTab, setConsoleTab] = useState<'cases' | 'result'>('cases');
+  const [caseIdx, setCaseIdx] = useState(0);
+  const [focus, setFocus] = useState<boolean>(() => stored('crucible:focus', false));
+  const [fontSize, setFontSize] = useState<number>(() => stored('crucible:fontSize', 13.5));
+  const [showKeys, setShowKeys] = useState(false);
+  const changeFont = (d: number) => setFontSize((f) => { const v = Math.min(22, Math.max(11, f + d)); store('crucible:fontSize', v); return v; });
+  const toggleFocus = () => setFocus((f) => { store('crucible:focus', !f); return !f; });
 
-  const run = (kind: 'run' | 'submit') => judge.submit({ questionId: p.problem.id, language, code, kind, customInput: kind === 'run' && customOn && !isSql ? custom : null });
+  const run = (kind: 'run' | 'submit') => {
+    setConsoleTab('result');
+    judge.submit({ questionId: p.problem.id, language, code, kind, customInput: kind === 'run' && customOn && !isSql ? custom : null });
+  };
 
   // Ctrl/Cmd+Enter runs, Ctrl/Cmd+Shift+Enter submits.
   useEffect(() => {
@@ -118,7 +152,7 @@ export function Workspace(p: WorkspaceProps) {
   return (
     <div className="flex h-full min-h-0 flex-col lg:flex-row">
       <section
-        className={cx('flex min-h-0 flex-col border-b border-ink-800 lg:basis-[var(--split)] lg:border-r lg:border-b-0', p.blockCopy && 'select-none')}
+        className={cx('flex min-h-0 flex-col border-b border-ink-800 lg:basis-[var(--split)] lg:border-r lg:border-b-0', p.blockCopy && 'select-none', focus && 'lg:hidden')}
         style={{ '--split': `${split}%` } as React.CSSProperties}
         aria-label="Problem statement"
         onCopy={p.blockCopy ? (e) => { e.preventDefault(); p.onBlockedCopy?.(); } : undefined}
@@ -169,7 +203,7 @@ export function Workspace(p: WorkspaceProps) {
           )}
         </div>
       </section>
-      <div onPointerDown={startSplit} className="hidden w-1 cursor-col-resize bg-ink-900 hover:bg-ember-500/40 lg:block" role="separator" aria-orientation="vertical" aria-label="Resize panels" />
+      <div onPointerDown={startSplit} className={cx('hidden w-1 cursor-col-resize bg-ink-900 transition-colors hover:bg-ember-500/50', !focus && 'lg:block')} role="separator" aria-orientation="vertical" aria-label="Resize panels" />
       <section className="flex min-h-[70vh] min-w-0 flex-1 flex-col lg:min-h-0" aria-label="Code editor">
         <div className="flex flex-wrap items-center gap-2 border-b border-ink-800 px-3 py-2">
           {isSql ? <Badge className="border-sky-500/30 text-sky-300">SQLite</Badge> : (
@@ -177,30 +211,72 @@ export function Workspace(p: WorkspaceProps) {
               {languages.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
             </Select>
           )}
-          <Button size="sm" variant="ghost" onClick={() => { if (confirm('Reset the editor to the starter code?')) onEdit(templateFor(language)); }} title="Reset to template"><RotateCcw className="size-3.5" /></Button>
+          <div className="flex items-center rounded-lg border border-ink-800">
+            <button onClick={() => { if (confirm('Reset the editor to the starter code?')) onEdit(templateFor(language)); }} title="Reset to starter code" aria-label="Reset to starter code" className="grid size-8 place-items-center text-ink-400 hover:text-ink-100"><RotateCcw className="size-3.5" /></button>
+            <button onClick={() => changeFont(-1)} title="Smaller text" aria-label="Smaller text" className="grid size-8 place-items-center border-l border-ink-800 text-ink-400 hover:text-ink-100"><AArrowDown className="size-4" /></button>
+            <button onClick={() => changeFont(1)} title="Larger text" aria-label="Larger text" className="grid size-8 place-items-center border-l border-ink-800 text-ink-400 hover:text-ink-100"><AArrowUp className="size-4" /></button>
+            <button onClick={toggleFocus} title={focus ? 'Show problem' : 'Focus mode: hide problem'} aria-pressed={focus} aria-label="Focus mode" className={cx('hidden size-8 place-items-center border-l border-ink-800 lg:grid', focus ? 'text-ember-300' : 'text-ink-400 hover:text-ink-100')}>{focus ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}</button>
+            <div className="relative border-l border-ink-800">
+              <button onClick={() => setShowKeys(!showKeys)} title="Keyboard shortcuts" aria-label="Keyboard shortcuts" aria-expanded={showKeys} className="grid size-8 place-items-center text-ink-400 hover:text-ink-100"><Keyboard className="size-3.5" /></button>
+              {showKeys && (
+                <div className="absolute top-10 left-0 z-30 w-72 rounded-xl border border-ink-700 bg-ink-900 p-3 shadow-2xl shadow-black/25" onMouseLeave={() => setShowKeys(false)}>
+                  <div className="mb-2 text-xs font-medium text-ink-200">Keyboard shortcuts</div>
+                  <ul className="space-y-1.5 text-xs">{SHORTCUTS.map(([k, d]) => <li key={k} className="flex items-center justify-between gap-3"><span className="text-ink-400">{d}</span><kbd className="rounded border border-ink-700 bg-ink-850 px-1.5 py-0.5 font-sans text-[10px] text-ink-200">{k}</kbd></li>)}</ul>
+                </div>
+              )}
+            </div>
+          </div>
           <div className="ml-auto flex items-center gap-2">
-            {!isSql && (
-              <label className="flex items-center gap-1.5 text-xs text-ink-400">
-                <input type="checkbox" checked={customOn} onChange={(e) => setCustomOn(e.target.checked)} className="accent-ember-500" /> Custom input
-              </label>
-            )}
             <Button size="sm" onClick={() => run('run')} loading={judge.busy && judge.state.kind === 'run'} disabled={judge.busy} title="Run on sample tests (Ctrl+Enter)"><Play className="size-3.5" /> Run</Button>
             <Button size="sm" variant="primary" onClick={() => run('submit')} loading={judge.busy && judge.state.kind === 'submit'} disabled={judge.busy} title="Submit for judging (Ctrl+Shift+Enter)"><Send className="size-3.5" /> Submit</Button>
           </div>
         </div>
         <div className="min-h-[240px] flex-1 overflow-hidden">
-          <CodeEditor value={code} onChange={onEdit} language={language} onPaste={p.onPaste} onCopy={p.onCopy} blockExternalPaste={p.blockExternalPaste} onBlockedPaste={p.onBlockedPaste} />
+          <CodeEditor fontSize={fontSize} value={code} onChange={onEdit} language={language} onPaste={p.onPaste} onCopy={p.onCopy} blockExternalPaste={p.blockExternalPaste} onBlockedPaste={p.onBlockedPaste} />
         </div>
-        {customOn && !isSql && (
-          <div className="border-t border-ink-800 px-3 py-2">
-            <div className="mb-1 flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-ink-400"><Lightbulb className="size-3" /> Custom input (runs alongside the samples)</div>
-            <textarea value={custom} onChange={(e) => setCustom(e.target.value)} rows={3}
-              onPaste={p.blockExternalPaste ? (e) => { const t = e.clipboardData.getData('text'); if (t && !isInternalText(t)) { e.preventDefault(); p.onBlockedPaste?.(); } } : undefined} className="w-full resize-y rounded-md border border-ink-700 bg-ink-950 px-2 py-1.5 font-mono text-xs text-ink-100 focus:border-ember-500/60 focus:outline-none" aria-label="Custom input" />
-          </div>
-        )}
         <div onPointerDown={startConsole} className="hidden h-1 cursor-row-resize bg-ink-900 hover:bg-ember-500/40 lg:block" role="separator" aria-orientation="horizontal" aria-label="Resize console" />
-        <div className="min-h-[260px] border-t border-ink-800 bg-ink-900/60 lg:h-[var(--console)] lg:min-h-[200px]" style={{ '--console': `${consoleH}%` } as React.CSSProperties} aria-live="polite">
-          <ResultsPanel state={judge.state} />
+        <div className="flex min-h-[260px] flex-col border-t border-ink-800 bg-ink-900/60 lg:h-[var(--console)] lg:min-h-[200px]" style={{ '--console': `${consoleH}%` } as React.CSSProperties}>
+          <div className="flex items-center gap-1 border-b border-ink-800 px-2 py-1.5" role="tablist" aria-label="Console">
+            {(['cases', 'result'] as const).map((t) => (
+              <button key={t} role="tab" aria-selected={consoleTab === t} onClick={() => setConsoleTab(t)} className={cx('flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium', consoleTab === t ? 'bg-ink-800 text-ink-100' : 'text-ink-400 hover:text-ink-100')}>
+                {t === 'cases' ? <><ListTree className="size-3.5" /> Test cases</> : <><Terminal className="size-3.5" /> Result
+                  {judge.state.phase !== 'idle' && <span className={cx('size-1.5 rounded-full', judge.busy ? 'animate-ember bg-ember-400' : judge.state.submission?.verdict === 'AC' || judge.state.submission?.verdict === 'OK' ? 'bg-emerald-400' : 'bg-rose-400')} />}</>}
+              </button>
+            ))}
+            {customOn && !isSql && <span className="ml-auto rounded bg-ember-500/10 px-1.5 py-0.5 text-[10px] text-ember-300">custom input on</span>}
+          </div>
+          <div className="min-h-0 flex-1 overflow-auto" aria-live="polite">
+            {consoleTab === 'result' ? <ResultsPanel state={judge.state} /> : (
+              <div className="p-3">
+                <div className="mb-3 flex flex-wrap gap-1.5">
+                  {(p.problem.samples ?? []).map((_, i) => (
+                    <button key={i} onClick={() => setCaseIdx(i)} className={cx('rounded-md border px-2.5 py-1 text-xs', caseIdx === i ? 'border-ink-500 bg-ink-800 text-ink-100' : 'border-ink-800 text-ink-400 hover:border-ink-600')}>{isSql ? 'Dataset' : 'Case'} {i + 1}</button>
+                  ))}
+                  {!isSql && <button onClick={() => setCaseIdx(-1)} className={cx('flex items-center gap-1 rounded-md border px-2.5 py-1 text-xs', caseIdx === -1 ? 'border-ember-500/60 bg-ember-500/10 text-ember-200' : 'border-dashed border-ink-700 text-ink-400 hover:border-ink-500')}><Lightbulb className="size-3" /> Custom</button>}
+                </div>
+                {caseIdx === -1 && !isSql ? (
+                  <div>
+                    <label className="mb-2 flex items-center gap-2 text-xs text-ink-300"><input type="checkbox" checked={customOn} onChange={(e) => setCustomOn(e.target.checked)} className="accent-ember-500" /> Include this input when I press Run</label>
+                    <textarea value={custom} onChange={(e) => { setCustom(e.target.value); if (!customOn) setCustomOn(true); }} rows={5}
+                      onPaste={p.blockExternalPaste ? (e) => { const t = e.clipboardData.getData('text'); if (t && !isInternalText(t)) { e.preventDefault(); p.onBlockedPaste?.(); } } : undefined}
+                      className="w-full resize-y rounded-md border border-ink-700 bg-ink-950 px-2.5 py-2 font-mono text-xs text-ink-100 focus:border-ember-500/60 focus:outline-none" aria-label="Custom input" spellCheck={false} />
+                  </div>
+                ) : p.problem.samples?.[caseIdx] ? (
+                  isSql ? (
+                    <div className="space-y-2">
+                      <pre className="max-h-32 overflow-auto rounded-md border border-ink-800 bg-ink-950 p-2.5 font-mono text-[11px] text-ink-300">{p.problem.samples[caseIdx].input}</pre>
+                      {p.problem.samples[caseIdx].expectedTable && <SqlTable table={p.problem.samples[caseIdx].expectedTable!} />}
+                    </div>
+                  ) : (
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <div><div className="mb-1 text-[11px] uppercase tracking-wide text-ink-400">Input</div><pre className="max-h-40 overflow-auto rounded-md border border-ink-800 bg-ink-950 p-2.5 font-mono text-xs text-ink-200">{p.problem.samples[caseIdx].input}</pre></div>
+                      <div><div className="mb-1 text-[11px] uppercase tracking-wide text-ink-400">Expected output</div><pre className="max-h-40 overflow-auto rounded-md border border-ink-800 bg-ink-950 p-2.5 font-mono text-xs text-ink-200">{p.problem.samples[caseIdx].expected}</pre></div>
+                    </div>
+                  )
+                ) : <p className="text-xs text-ink-400">No sample cases.</p>}
+              </div>
+            )}
+          </div>
         </div>
       </section>
     </div>

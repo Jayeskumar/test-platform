@@ -101,6 +101,10 @@ export function inviteCandidates(assessmentId: number, candidates: { email: stri
 function attemptSummary(a: any) {
   const integrity = parseJson<any>(a.integrity, null);
   return {
+    decision: a.decision ?? null,
+    notes: a.notes ?? '',
+    decidedAt: a.decided_at ?? null,
+    decidedBy: a.decided_by ?? null,
     id: a.id,
     name: a.candidate_name,
     email: a.candidate_email,
@@ -138,6 +142,91 @@ export async function assessmentRoutes(app: FastifyInstance) {
     };
   });
 
+  /** Dashboard overview across all of the user's assessments. */
+  app.get('/api/hiring/overview', async (req) => {
+    const user = requireStaff(req);
+    const db = getDb();
+    const owned = `s.owner_id = ? OR ? = 'admin'`;
+    const one = (sql: string, ...p: any[]) => db.get<any>(sql, user.id, user.role, ...p).n as number;
+    const weekAgo = now() - 7 * 86400_000;
+    const recent = db.all<any>(
+      `SELECT a.id, a.candidate_name, a.candidate_email, a.score, a.max_score, a.integrity, a.submitted_at, a.decision, s.id AS assessment_id, s.title
+       FROM attempts a JOIN assessments s ON s.id = a.assessment_id
+       WHERE (${owned}) AND a.status = 'submitted' AND a.decision IS NULL ORDER BY a.submitted_at DESC LIMIT 8`,
+      user.id, user.role,
+    );
+    return {
+      stats: {
+        activeAssessments: one(`SELECT COUNT(*) AS n FROM assessments s WHERE (${owned}) AND s.status = 'active'`),
+        inProgress: one(`SELECT COUNT(*) AS n FROM attempts a JOIN assessments s ON s.id = a.assessment_id WHERE (${owned}) AND a.status = 'in_progress'`),
+        completedThisWeek: one(`SELECT COUNT(*) AS n FROM attempts a JOIN assessments s ON s.id = a.assessment_id WHERE (${owned}) AND a.status = 'submitted' AND a.submitted_at > ?`, weekAgo),
+        awaitingReview: one(`SELECT COUNT(*) AS n FROM attempts a JOIN assessments s ON s.id = a.assessment_id WHERE (${owned}) AND a.status = 'submitted' AND a.decision IS NULL`),
+        flagged: db.all<any>(
+          `SELECT a.integrity FROM attempts a JOIN assessments s ON s.id = a.assessment_id WHERE (${owned}) AND a.status = 'submitted' AND a.decision IS NULL`,
+          user.id, user.role,
+        ).filter((r) => (parseJson<any>(r.integrity, null)?.level ?? 'high') !== 'high').length,
+      },
+      awaitingReview: recent.map((r) => {
+        const integ = parseJson<any>(r.integrity, null);
+        return {
+          attemptId: r.id, name: r.candidate_name || r.candidate_email, assessmentId: r.assessment_id, assessment: r.title,
+          scorePct: r.max_score ? Math.round((r.score / r.max_score) * 100) : null, submittedAt: r.submitted_at,
+          integrity: integ ? { score: integ.score, level: integ.level } : null,
+        };
+      }),
+    };
+  });
+
+  /** Side-by-side comparison of up to four candidates. */
+  app.get('/api/assessments/:id/compare', async (req) => {
+    const user = requireStaff(req);
+    const asmt = ownedAssessment(user, Number((req.params as any).id));
+    const ids = String((req.query as any).ids ?? '').split(',').map(Number).filter((n) => n > 0).slice(0, 4);
+    const db = getDb();
+    const qs = db.all<any>(
+      `SELECT q.id, q.title, q.type, aq.points, aq.pool FROM assessment_questions aq JOIN questions q ON q.id = aq.question_id WHERE aq.assessment_id = ? ORDER BY aq.ord`,
+      asmt.id,
+    );
+    const candidates = ids.map((id) => {
+      const at = db.get<any>('SELECT * FROM attempts WHERE id = ? AND assessment_id = ?', id, asmt.id);
+      if (!at) throw new HttpError(404, `Attempt ${id} is not part of this assessment.`);
+      const drawn = new Set(attemptQuestionIds(at));
+      const integ = at.status === 'invited' ? null : computeIntegrity(at.id);
+      const perQ = qs.map((q) => {
+        if (!drawn.has(q.id)) return { questionId: q.id, drawn: false };
+        const ans = db.get<any>('SELECT * FROM answers WHERE attempt_id = ? AND question_id = ?', at.id, q.id);
+        const best = ans?.best_submission_id ? db.get<any>('SELECT verdict, passed, total, language, complexity FROM submissions WHERE id = ?', ans.best_submission_id) : null;
+        const cx = parseJson<any>(best?.complexity, null);
+        return {
+          questionId: q.id, drawn: true, score: ans?.score ?? 0,
+          verdict: best?.verdict ?? null, passed: best?.passed ?? null, total: best?.total ?? null, language: best?.language ?? ans?.language ?? null,
+          complexity: cx ? { estimate: cx.estimate, meetsTarget: cx.meetsTarget } : null,
+        };
+      });
+      return {
+        ...attemptSummary(at),
+        integrity: integ ? { score: integ.score, level: integ.level, flags: integ.flags, counts: integ.counts } : null,
+        questions: perQ,
+      };
+    });
+    return { assessment: { id: asmt.id, title: asmt.title, durationMin: asmt.duration_min }, questions: qs, candidates };
+  });
+
+  /** Reviewer decision and notes for an attempt. */
+  app.put('/api/attempts/:id/review', async (req) => {
+    const user = requireStaff(req);
+    const at = ownedAttempt(user, Number((req.params as any).id));
+    const body = z.object({
+      decision: z.enum(['advance', 'hold', 'reject']).nullable(),
+      notes: z.string().max(10_000).default(''),
+    }).parse(req.body);
+    getDb().run(
+      'UPDATE attempts SET decision = ?, notes = ?, decided_at = ?, decided_by = ? WHERE id = ?',
+      body.decision, body.notes, body.decision ? now() : null, body.decision ? user.name : null, at.id,
+    );
+    return { ok: true, decision: body.decision, notes: body.notes };
+  });
+
   app.post('/api/assessments', async (req) => {
     const user = requireStaff(req);
     return { id: createAssessment(req.body, user.id) };
@@ -161,6 +250,13 @@ export async function assessmentRoutes(app: FastifyInstance) {
       const total = got.reduce((sum, t) => sum + (db.get<any>('SELECT score FROM answers WHERE attempt_id = ? AND question_id = ?', t.id, q.id)?.score ?? 0), 0);
       return { questionId: q.id, avgPct: got.length ? Math.round((total / got.length / q.points) * 100) : 0, candidates: got.length };
     });
+    // Per-question scores for each candidate (CSV export, comparisons).
+    const scoreRows = db.all<any>(
+      'SELECT an.attempt_id, an.question_id, an.score FROM answers an JOIN attempts t ON t.id = an.attempt_id WHERE t.assessment_id = ?',
+      a.id,
+    );
+    const scores = new Map<number, Record<number, number>>();
+    for (const r of scoreRows) scores.set(r.attempt_id, { ...(scores.get(r.attempt_id) ?? {}), [r.question_id]: r.score });
     return {
       assessment: {
         id: a.id, title: a.title, description: a.description, durationMin: a.duration_min, status: a.status,
@@ -168,7 +264,7 @@ export async function assessmentRoutes(app: FastifyInstance) {
       },
       questions,
       perQuestion,
-      attempts: attempts.map(attemptSummary),
+      attempts: attempts.map((t) => ({ ...attemptSummary(t), scores: scores.get(t.id) ?? {}, questionIds: t.status === 'invited' ? null : attemptQuestionIds(t) })),
     };
   });
 

@@ -5,11 +5,13 @@ import { javascript } from '@codemirror/lang-javascript';
 import { python } from '@codemirror/lang-python';
 import { rust } from '@codemirror/lang-rust';
 import { sql } from '@codemirror/lang-sql';
+import { Prec } from '@codemirror/state';
 import { oneDark } from '@codemirror/theme-one-dark';
 import { EditorView } from '@codemirror/view';
 import CodeMirror from '@uiw/react-codemirror';
 import { useMemo } from 'react';
 import { isInternalText, rememberInternalCopy } from '../lib/proctor';
+import { useTheme } from '../lib/theme';
 
 const LANGS: Record<string, () => any> = {
   python: () => python(),
@@ -23,15 +25,23 @@ const LANGS: Record<string, () => any> = {
   sql: () => sql(),
 };
 
-const theme = EditorView.theme({
-  '&': { backgroundColor: 'var(--color-ink-950)' },
-  '.cm-gutters': { backgroundColor: 'var(--color-ink-950)', borderRight: '1px solid var(--color-ink-800)' },
-  '.cm-activeLine, .cm-activeLineGutter': { backgroundColor: 'rgba(255,255,255,0.03)' },
-});
+/** Surface colors follow the app palette (CSS variables), so the editor matches both themes. */
+const surface = Prec.highest(EditorView.theme({
+  '&': { backgroundColor: 'var(--color-ink-900)', color: 'var(--color-ink-100)' },
+  '.cm-content': { caretColor: 'var(--color-ember-400)' },
+  '.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--color-ember-400)' },
+  '.cm-gutters': { backgroundColor: 'var(--color-ink-900)', color: 'var(--color-ink-500)', borderRight: '1px solid var(--color-ink-800)' },
+  '.cm-activeLine': { backgroundColor: 'color-mix(in oklab, var(--color-ink-700) 35%, transparent)' },
+  '.cm-activeLineGutter': { backgroundColor: 'transparent', color: 'var(--color-ink-200)' },
+  '&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection': { backgroundColor: 'color-mix(in oklab, var(--color-ember-500) 28%, transparent) !important' },
+  '.cm-tooltip, .cm-panels': { backgroundColor: 'var(--color-ink-850)', border: '1px solid var(--color-ink-700)' },
+}));
 
 export function CodeEditor({
-  value, onChange, language, readOnly, onPaste, onCopy, minHeight, blockExternalPaste, onBlockedPaste,
+  value, onChange, language, readOnly, onPaste, onCopy, minHeight, blockExternalPaste, onBlockedPaste, fontSize,
 }: {
+  /** Editor font size in px; changing it reconfigures the view so gutters re-measure. */
+  fontSize?: number;
   value: string;
   onChange?: (v: string) => void;
   language: string;
@@ -43,8 +53,10 @@ export function CodeEditor({
   blockExternalPaste?: boolean;
   onBlockedPaste?: () => void;
 }) {
+  const { resolved } = useTheme();
   const extensions = useMemo(() => {
-    const ext = [theme, EditorView.lineWrapping];
+    const ext = [surface, EditorView.lineWrapping];
+    if (fontSize) ext.push(EditorView.theme({ '&': { fontSize: `${fontSize}px` } }));
     const lang = LANGS[language];
     if (lang) ext.push(lang());
     if (onPaste || onCopy || blockExternalPaste) {
@@ -77,12 +89,12 @@ export function CodeEditor({
       }));
     }
     return ext;
-  }, [language, onPaste, onCopy, blockExternalPaste, onBlockedPaste]);
+  }, [language, onPaste, onCopy, blockExternalPaste, onBlockedPaste, fontSize]);
   return (
     <CodeMirror
       value={value}
       onChange={onChange}
-      theme={oneDark}
+      theme={resolved === 'dark' ? oneDark : 'light'}
       extensions={extensions}
       readOnly={readOnly}
       editable={!readOnly}

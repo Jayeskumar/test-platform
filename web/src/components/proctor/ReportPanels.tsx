@@ -13,7 +13,7 @@ const faceBadge = (m: MediaItem) => {
   if (m.faces == null) return { text: 'not analyzed', cls: 'bg-ink-700 text-ink-200' };
   if (m.faces === 0) return { text: 'no face', cls: 'bg-rose-500/90 text-white' };
   if (m.faces > 1) return { text: `${m.faces} people`, cls: 'bg-rose-500/90 text-white' };
-  return { text: '1 face', cls: 'bg-emerald-500/80 text-ink-950' };
+  return { text: '1 face', cls: 'bg-emerald-500/80 text-on-accent' };
 };
 const flagged = (m: MediaItem) => m.faces != null && m.faces !== 1;
 

@@ -49,7 +49,8 @@ At the same time, candidates distrust opaque proctoring, and practice platforms 
 - Reports: score and percentile, integrity timeline, playback, per-test results, complexity, plagiarism, optional AI review
 - Proctoring (v0.2): webcam snapshots with on-device face detection, identity check, paste/copy lockdown, one-browser lock, second-display and duplicate-tab detection, device fingerprinting and shared-device detection, question pools, automatic retention
 - Question library and editor with validation
-- 77 automated tests, including security-boundary tests, proctoring tests, and cross-language verification of the problem set
+- 79 automated tests, including security-boundary tests, proctoring tests, and cross-language verification of the problem set
+- Reviewer workflow (v0.3): review queue, compare candidates, decisions and notes, CSV export, PDF reports; light/dark themes, command palette, redesigned IDE and landing page
 
 ## Success metrics
 
@@ -71,7 +72,7 @@ At the same time, candidates distrust opaque proctoring, and practice platforms 
 - A second camera angle via a paired phone, showing the desk and screen
 - Optional screen-share snapshots, consent-gated like the webcam
 - Assisted face matching between selfie, ID and snapshots (reviewer-confirmed, never automatic rejection)
-- Reviewer workflow: mark flags as "explained" or "concern", with notes
+- Reviewer workflow: mark individual flags as "explained" or "concern"
 
 **Hardening**
 - A seccomp syscall allow-list in the sandbox supervisor; optional gVisor or Firecracker backend

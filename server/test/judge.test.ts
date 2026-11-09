@@ -130,6 +130,12 @@ describe('complexity estimator', () => {
   test('linear', () => assert.equal(estimateComplexity(pts((n) => n / 400), 'O(n)').estimate, 'O(n)'));
   test('quadratic', () => assert.equal(estimateComplexity(pts((n) => (n * n) / 2e7), 'O(n)').estimate, 'O(n^2)'));
   test('square root', () => assert.equal(estimateComplexity(pts((n) => Math.sqrt(n)), 'O(n)').estimate, 'O(√n)'));
+  test('never below O(n) when the input itself grows linearly', () => {
+    // JVM-like start-up cost flattening a linear curve.
+    const pts = [20000, 40000, 80000, 160000, 320000].map((n, i) => ({ n, cpuMs: [84, 81, 116, 141, 221][i], status: 'OK' }));
+    assert.equal(estimateComplexity(pts, 'O(n)', { linearInput: true }).estimate, 'O(n)');
+    assert.equal(estimateComplexity(pts.map((p) => ({ ...p, cpuMs: 30 })), 'O(n)', { linearInput: true }).estimate, 'O(n)');
+  });
   test('timeouts fail the target', () => {
     const r = estimateComplexity([...pts((n) => n / 400).slice(0, 3), { n: 80000, cpuMs: 4000, status: 'TLE' }], 'O(n)');
     assert.equal(r.meetsTarget, false);

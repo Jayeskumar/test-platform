@@ -1,4 +1,7 @@
-import { ArrowLeft, Ban, BrainCircuit, CameraOff, CheckCircle2, ClipboardPaste, Copy, Eye, EyeOff, Laptop, Maximize, Minimize2, MonitorSmartphone, Send, UserX, Users, XCircle } from 'lucide-react';
+import { ArrowLeft, Ban, Printer, BrainCircuit, CameraOff, CheckCircle2, ClipboardPaste, Copy, Eye, EyeOff, Laptop, Maximize, Minimize2, MonitorSmartphone, Send, UserX, Users, XCircle } from 'lucide-react';
+import { useAuth } from '../lib/auth';
+import { useToast } from '../lib/toast';
+import { DECISION, type Decision } from './AssessmentDetail';
 import { AccessPanel, type AccessRow, type MediaItem, ProctoringPanel, type SharedWith } from '../components/proctor/ReportPanels';
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
@@ -21,7 +24,7 @@ interface QReport {
   snapshots?: Snapshot[];
 }
 interface Report {
-  attempt: { id: number; name: string; email: string; status: string; startedAt: number; submittedAt: number | null; deadlineAt: number; score: number; maxScore: number; durationMs: number | null; percentile: number | null; deviceLocked: boolean };
+  attempt: { decision: Decision; notes: string; decidedAt: number | null; decidedBy: string | null; id: number; name: string; email: string; status: string; startedAt: number; submittedAt: number | null; deadlineAt: number; score: number; maxScore: number; durationMs: number | null; percentile: number | null; deviceLocked: boolean };
   assessment: { id: number; title: string; durationMin: number; proctoring: { webcam: boolean; identityCheck: boolean; singleDevice: boolean }; retentionDays: number; usesPools: boolean };
   media: MediaItem[];
   access: AccessRow[];
@@ -174,6 +177,44 @@ function AiReview({ r, onReview }: { r: Report; onReview: (v: any) => void }) {
   );
 }
 
+function DecisionPanel({ r, onSaved }: { r: Report; onSaved: (d: Decision, notes: string, by: string | null) => void }) {
+  const toast = useToast();
+  const { user } = useAuth();
+  const [notes, setNotes] = useState(r.attempt.notes ?? '');
+  const [saving, setSaving] = useState(false);
+  const save = async (decision: Decision, n = notes) => {
+    setSaving(true);
+    try {
+      await api.put(`/api/attempts/${r.attempt.id}/review`, { decision, notes: n });
+      onSaved(decision, n, decision ? user?.name ?? null : null);
+      if (decision === r.attempt.decision) toast.success('Notes saved');
+      else toast.success(decision ? `Marked as “${DECISION[decision].label}”` : 'Decision cleared');
+    } catch (e: any) { toast.error(e.message); } finally { setSaving(false); }
+  };
+  const cur = r.attempt.decision;
+  return (
+    <Card className="no-print p-5">
+      <div className="flex flex-wrap items-center gap-3">
+        <h2 className="mr-auto font-semibold text-ink-100">Your decision</h2>
+        {r.attempt.decidedAt && <span className="text-xs text-ink-500">by {r.attempt.decidedBy} · {new Date(r.attempt.decidedAt).toLocaleDateString()}</span>}
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2" role="radiogroup" aria-label="Decision">
+        {(['advance', 'hold', 'reject'] as const).map((d) => (
+          <button key={d} role="radio" aria-checked={cur === d} disabled={saving || r.attempt.status !== 'submitted'} onClick={() => save(cur === d ? null : d)}
+            className={cx('rounded-lg border px-4 py-2 text-sm font-medium transition-colors disabled:opacity-50', cur === d ? DECISION[d].cls : 'border-ink-700 text-ink-300 hover:border-ink-500 hover:text-ink-100')}>
+            {DECISION[d].label}
+          </button>
+        ))}
+      </div>
+      {r.attempt.status !== 'submitted' && <p className="mt-2 text-xs text-ink-500">You can decide once the candidate has submitted.</p>}
+      <textarea value={notes} onChange={(e) => setNotes(e.target.value)} onBlur={() => { if (notes !== (r.attempt.notes ?? '')) void save(cur, notes); }} rows={2} placeholder="Private notes for your team (saved when you click away)"
+        className="mt-3 w-full rounded-lg border border-ink-700 bg-ink-900 px-3 py-2 text-sm text-ink-100 placeholder:text-ink-500 focus:border-ember-500/70 focus:outline-none" aria-label="Notes" />
+    </Card>
+  );
+}
+
+const SECTIONS: [string, string][] = [['overview', 'Overview'], ['integrity', 'Integrity'], ['proctoring', 'Proctoring'], ['devices', 'Devices'], ['ai', 'AI review'], ['questions', 'Questions']];
+
 export function CandidateReport() {
   const { id } = useParams();
   const [r, setR] = useState<Report | null>(null);
@@ -185,10 +226,18 @@ export function CandidateReport() {
   const a = r.attempt;
   const scorePct = pct(a.score ?? 0, a.maxScore ?? 1);
   const aiByQ = new Map<number, any>((r.ai.review?.questions ?? []).map((x: any) => [x.questionId, x]));
+  const hasProctoring = r.media.length > 0 || r.assessment.proctoring.webcam || r.assessment.proctoring.identityCheck;
+  const sections = SECTIONS.filter(([k]) => (k === 'proctoring' ? hasProctoring : k === 'devices' || k === 'integrity' ? a.status !== 'invited' : true));
   return (
     <Page>
-      <Link to={`/hiring/${r.assessment.id}`} className="mb-4 inline-flex items-center gap-1 text-sm text-ink-400 hover:text-ink-200"><ArrowLeft className="size-4" /> {r.assessment.title}</Link>
-      <div className="flex flex-wrap items-center gap-6 rounded-2xl border border-ink-800 bg-ink-900/70 p-6">
+      <Link to={`/hiring/${r.assessment.id}`} className="no-print mb-4 inline-flex items-center gap-1 text-sm text-ink-400 hover:text-ink-200"><ArrowLeft className="size-4" /> {r.assessment.title}</Link>
+      <nav className="no-print sticky top-14 z-20 -mx-4 mb-4 flex items-center gap-1 overflow-x-auto border-b border-ink-800 bg-ink-950/85 px-4 py-2 backdrop-blur" aria-label="Report sections">
+        {sections.map(([k, label]) => (
+          <a key={k} href={`#${k}`} onClick={(e) => { e.preventDefault(); document.getElementById(k)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }} className="shrink-0 rounded-md px-2.5 py-1 text-xs font-medium text-ink-400 hover:bg-ink-800 hover:text-ink-100">{label}</a>
+        ))}
+        <Button size="sm" variant="ghost" className="ml-auto shrink-0" onClick={() => window.print()} title="Save as PDF or print"><Printer className="size-3.5" /> Export PDF</Button>
+      </nav>
+      <div id="overview" className="flex scroll-mt-28 flex-wrap items-center gap-6 rounded-2xl border border-ink-800 bg-ink-900/70 p-6">
         <ScoreRing value={scorePct} size={96} label="Score" />
         <div className="min-w-0 flex-1">
           <h1 className="text-2xl font-semibold text-ink-100">{a.name || a.email}</h1>
@@ -210,8 +259,11 @@ export function CandidateReport() {
         )}
       </div>
 
+      <div className="mt-4"><DecisionPanel r={r} onSaved={(decision, notes, by) => setR({ ...r, attempt: { ...r.attempt, decision, notes, decidedAt: decision ? Date.now() : null, decidedBy: by } })} /></div>
+      {r.attempt.decision && <div className="mt-2 hidden print:block">Decision: {DECISION[r.attempt.decision].label}{r.attempt.notes ? ` — ${r.attempt.notes}` : ''}</div>}
+
       {r.integrity && (
-        <Card className="mt-4 p-5">
+        <Card id="integrity" className="mt-4 scroll-mt-28 p-5">
           <h2 className="mb-3 font-semibold text-ink-100">Integrity timeline</h2>
           <Timeline r={r} />
           <div className="mt-4 grid gap-4 md:grid-cols-[1fr_auto]">
@@ -229,14 +281,14 @@ export function CandidateReport() {
       )}
 
       {(r.media.length > 0 || r.assessment.proctoring.webcam || r.assessment.proctoring.identityCheck) && (
-        <div className="mt-4"><ProctoringPanel attemptId={a.id} media={r.media} startedAt={a.startedAt} retentionDays={r.assessment.retentionDays} webcam={r.assessment.proctoring.webcam} onDeleted={load} /></div>
+        <div id="proctoring" className="mt-4 scroll-mt-28"><ProctoringPanel attemptId={a.id} media={r.media} startedAt={a.startedAt} retentionDays={r.assessment.retentionDays} webcam={r.assessment.proctoring.webcam} onDeleted={load} /></div>
       )}
       {a.status !== 'invited' && (
-        <div className="mt-4"><AccessPanel attemptId={a.id} access={r.access} sharedWith={r.integrity?.access.sharedWith ?? []} startedAt={a.startedAt} canUnlock={r.assessment.proctoring.singleDevice && a.status === 'in_progress' && a.deviceLocked} onChanged={load} /></div>
+        <div id="devices" className="mt-4 scroll-mt-28"><AccessPanel attemptId={a.id} access={r.access} sharedWith={r.integrity?.access.sharedWith ?? []} startedAt={a.startedAt} canUnlock={r.assessment.proctoring.singleDevice && a.status === 'in_progress' && a.deviceLocked} onChanged={load} /></div>
       )}
-      <div className="mt-4"><AiReview r={r} onReview={(review) => setR({ ...r, ai: { ...r.ai, review } })} /></div>
+      <div id="ai" className={cx('mt-4 scroll-mt-28', !r.ai.review && 'no-print')}><AiReview r={r} onReview={(review) => setR({ ...r, ai: { ...r.ai, review } })} /></div>
 
-      <div className="mt-4 space-y-4">
+      <div id="questions" className="mt-4 scroll-mt-28 space-y-4">
         {r.questions.map((q, i) => {
           const ai = aiByQ.get(q.id);
           return (

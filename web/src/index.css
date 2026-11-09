@@ -20,7 +20,47 @@
   --color-ember-400: #fb923c;
   --color-ember-500: #f97316;
   --color-ember-600: #ea580c;
+  /* Text on saturated accent backgrounds (buttons, badges): dark in both themes. */
+  --color-on-accent: #1a0d03;
 }
+
+/*
+ * Light theme: the neutral "ink" scale is inverted (950 = page, 100 = text), and the
+ * bright accent shades used for text on dark backgrounds are swapped for darker ones
+ * so they keep WCAG contrast on white. Components need no per-theme classes.
+ */
+:root:not(.dark) {
+  color-scheme: light;
+  --color-ink-950: #f6f7f9;
+  --color-ink-900: #ffffff;
+  --color-ink-850: #f2f4f7;
+  --color-ink-800: #eaedf2;
+  --color-ink-700: #dde1e8;
+  --color-ink-600: #c5cbd5;
+  --color-ink-500: #9aa1ae;
+  --color-ink-400: #636b79;
+  --color-ink-300: #464d5a;
+  --color-ink-200: #2d333d;
+  --color-ink-100: #12151b;
+  --color-ember-200: #9a3412;
+  --color-ember-300: #c2410c;
+  --color-ember-400: #ea580c;
+  --color-emerald-200: #065f46;
+  --color-emerald-300: #047857;
+  --color-emerald-400: #059669;
+  --color-rose-200: #9f1239;
+  --color-rose-300: #be123c;
+  --color-rose-400: #e11d48;
+  --color-amber-200: #92400e;
+  --color-amber-300: #b45309;
+  --color-amber-400: #d97706;
+  --color-sky-200: #075985;
+  --color-sky-300: #0369a1;
+  --color-fuchsia-300: #a21caf;
+  --color-orange-300: #c2410c;
+  --color-orange-400: #ea580c;
+}
+:root.dark { color-scheme: dark; }
 
 html, body, #root { height: 100%; }
 body {
@@ -48,9 +88,27 @@ body {
 .prose-crucible th { background: var(--color-ink-800); }
 .prose-crucible strong { color: var(--color-ink-100); }
 
-.cm-editor { height: 100%; font-size: 13.5px; }
+.cm-editor { height: 100%; font-size: var(--editor-font-size, 13.5px); }
 .cm-editor .cm-scroller { font-family: var(--font-mono); }
 .cm-editor.cm-focused { outline: none; }
 
 @keyframes pulse-ember { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
 .animate-ember { animation: pulse-ember 1.2s ease-in-out infinite; }
+
+/* Smooth theme switches without animating everything on load. */
+.theme-transition, .theme-transition * { transition: background-color .2s ease, border-color .2s ease, color .2s ease !important; }
+
+/* Skeleton shimmer */
+@keyframes shimmer { 100% { transform: translateX(100%); } }
+.skeleton { position: relative; overflow: hidden; background: var(--color-ink-800); border-radius: 0.5rem; }
+.skeleton::after { content: ""; position: absolute; inset: 0; transform: translateX(-100%); background: linear-gradient(90deg, transparent, color-mix(in oklab, var(--color-ink-600) 40%, transparent), transparent); animation: shimmer 1.4s infinite; }
+@media (prefers-reduced-motion: reduce) { .skeleton::after { animation: none; } .animate-ember { animation: none; } }
+
+/* Print (candidate reports → PDF) */
+@media print {
+  :root { --color-ink-950: #fff; --color-ink-900: #fff; --color-ink-850: #f5f5f5; --color-ink-800: #eee; --color-ink-700: #ddd; --color-ink-600: #ccc; --color-ink-500: #999; --color-ink-400: #555; --color-ink-300: #333; --color-ink-200: #222; --color-ink-100: #000; color-scheme: light; }
+  body { background: #fff !important; }
+  .no-print, header[data-app-nav] { display: none !important; }
+  .print-break { break-inside: avoid; }
+  main { max-width: none !important; padding: 0 !important; }
+}

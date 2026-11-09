@@ -181,7 +181,7 @@ export function ScoreRing({ value, size = 88, label }: { value: number; size?: n
     <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} role="img" aria-label={`${label ?? 'Score'} ${Math.round(v)} percent`}>
       <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--color-ink-800)" strokeWidth="7" />
       <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={color} strokeWidth="7" strokeLinecap="round" strokeDasharray={`${(v / 100) * C} ${C}`} transform={`rotate(-90 ${size / 2} ${size / 2})`} />
-      <text x="50%" y="50%" textAnchor="middle" dominantBaseline="central" fontSize={size / 4.4} fontWeight="600" fill="var(--color-ink-100)">{Math.round(v)}%</text>
+      <text x="50%" y="50%" textAnchor="middle" dominantBaseline="central" fontSize={size / (Math.round(v) >= 100 ? 5.4 : 4.4)} fontWeight="600" fill="var(--color-ink-100)">{Math.round(v)}%</text>
     </svg>
   );
 }

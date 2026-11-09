@@ -1,4 +1,4 @@
-import { ArrowLeft, CheckCircle2, XCircle } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, ChevronLeft, ChevronRight, List, XCircle } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Markdown } from '../components/Markdown';
@@ -22,7 +22,10 @@ function McqPractice({ problem }: { problem: Problem }) {
   };
   return (
     <div className="mx-auto max-w-2xl px-4 py-10">
-      <Link to="/problems" className="mb-4 inline-flex items-center gap-1 text-sm text-ink-400 hover:text-ink-200"><ArrowLeft className="size-4" /> Problems</Link>
+      <div className="mb-4 flex items-center justify-between">
+        <Link to="/problems" className="inline-flex items-center gap-1 text-sm text-ink-400 hover:text-ink-200"><ArrowLeft className="size-4" /> Problems</Link>
+        <ProblemNav slug={problem.slug} />
+      </div>
       <h1 className="text-xl font-semibold text-ink-100">{problem.title}</h1>
       <div className="mt-2 flex gap-2"><Difficulty d={problem.difficulty} />{problem.tags.map((t) => <Badge key={t}>{t}</Badge>)}</div>
       <div className="mt-4"><Markdown>{problem.statement}</Markdown></div>
@@ -77,6 +80,24 @@ function History({ slug, refresh }: { slug: string; refresh: number }) {
   );
 }
 
+/** Previous / next problem in the practice list, so learners can move through the set. */
+function ProblemNav({ slug }: { slug: string }) {
+  const [list, setList] = useState<{ slug: string; title: string }[] | null>(null);
+  useEffect(() => { api.get<{ problems: { slug: string; title: string }[] }>('/api/problems').then((r) => setList(r.problems)).catch(() => setList([])); }, []);
+  const i = list?.findIndex((x) => x.slug === slug) ?? -1;
+  const prev = i > 0 ? list![i - 1] : null;
+  const next = list && i >= 0 && i < list.length - 1 ? list[i + 1] : null;
+  const btn = 'grid size-7 place-items-center rounded-md text-ink-400 hover:bg-ink-800 hover:text-ink-100';
+  return (
+    <div className="flex items-center gap-1 text-xs text-ink-400">
+      <Link to="/problems" className={btn} title="All problems" aria-label="All problems"><List className="size-4" /></Link>
+      {prev ? <Link to={`/problems/${prev.slug}`} className={btn} title={`Previous: ${prev.title}`} aria-label="Previous problem"><ChevronLeft className="size-4" /></Link> : <span className={cx(btn, 'opacity-30')}><ChevronLeft className="size-4" /></span>}
+      {list && i >= 0 && <span className="tabular-nums">{i + 1}/{list.length}</span>}
+      {next ? <Link to={`/problems/${next.slug}`} className={btn} title={`Next: ${next.title}`} aria-label="Next problem"><ChevronRight className="size-4" /></Link> : <span className={cx(btn, 'opacity-30')}><ChevronRight className="size-4" /></span>}
+    </div>
+  );
+}
+
 export function Solve() {
   const { slug } = useParams();
   const [problem, setProblem] = useState<Problem | null>(null);
@@ -96,7 +117,7 @@ export function Solve() {
         problem={problem}
         storageKey={`practice:${problem.slug}`}
         onJudged={(s) => s.kind === 'submit' && setRefresh((x) => x + 1)}
-        headerExtra={<Link to="/problems" className="flex items-center gap-1 text-xs text-ink-400 hover:text-ink-200"><ArrowLeft className="size-3.5" /> All problems</Link>}
+        headerExtra={<ProblemNav slug={problem.slug} />}
         sideTabs={[{ id: 'history', label: 'Submissions', render: () => <History slug={problem.slug} refresh={refresh} /> }]}
       />
     </div>

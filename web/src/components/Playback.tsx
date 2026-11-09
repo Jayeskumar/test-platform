@@ -24,7 +24,7 @@ export function Playback({ snapshots, startedAt, pastes = [] }: { snapshots: Sna
   return (
     <div>
       <div className="mb-2 flex items-center gap-3">
-        <button onClick={() => { if (i >= snapshots.length - 1) setI(0); setPlaying(!playing); }} className="grid size-8 place-items-center rounded-full bg-ember-500 text-ink-950 hover:bg-ember-400" aria-label={playing ? 'Pause playback' : 'Play back'}>
+        <button onClick={() => { if (i >= snapshots.length - 1) setI(0); setPlaying(!playing); }} className="grid size-8 place-items-center rounded-full bg-ember-500 text-on-accent hover:bg-ember-400" aria-label={playing ? 'Pause playback' : 'Play back'}>
           {playing ? <Pause className="size-4" /> : <Play className="size-4" />}
         </button>
         <div className="relative flex-1">

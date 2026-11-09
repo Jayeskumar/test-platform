@@ -182,6 +182,13 @@ const MIGRATIONS: string[] = [
   CREATE INDEX IF NOT EXISTS idx_access_device ON access_log(device_id);
   CREATE INDEX IF NOT EXISTS idx_access_ip ON access_log(ip);
   `,
+  // 2 — reviewer workflow: decision and notes per attempt
+  `
+  ALTER TABLE attempts ADD COLUMN decision TEXT;
+  ALTER TABLE attempts ADD COLUMN notes TEXT;
+  ALTER TABLE attempts ADD COLUMN decided_at INTEGER;
+  ALTER TABLE attempts ADD COLUMN decided_by TEXT;
+  `,
 ];
 
 function migrate(db: DatabaseSync) {

@@ -73,7 +73,11 @@ function fit(model: Model, pts: { n: number; t: number }[]): number {
   return Math.sqrt(se / k) / scale;
 }
 
-export function estimateComplexity(points: ComplexityPoint[], expected: string): ComplexityReport {
+/**
+ * @param opts.linearInput the input grows linearly with n, so any program that reads it is
+ *   at least O(n): sub-linear estimates are measurement noise (e.g. JVM start-up) and are excluded.
+ */
+export function estimateComplexity(points: ComplexityPoint[], expected: string, opts: { linearInput?: boolean } = {}): ComplexityReport {
   const ok = points.filter((p) => p.status === 'OK');
   const timedOut = points.find((p) => p.status !== 'OK');
   const base: Omit<ComplexityReport, 'estimate' | 'meetsTarget' | 'confidence' | 'slope' | 'fits'> = { expected, points };
@@ -92,7 +96,8 @@ export function estimateComplexity(points: ComplexityPoint[], expected: string):
   }
   const pts = ok.map((p) => ({ n: p.n, t: p.cpuMs }));
   const maxN = Math.max(...pts.map((p) => p.n));
-  const candidates = MODELS.filter((m) => m.id !== 'O(2^n)' || maxN <= 40);
+  const floor = opts.linearInput ? rankOf('O(n)') : 0;
+  const candidates = MODELS.filter((m) => (m.id !== 'O(2^n)' || maxN <= 40) && (m.rank >= floor || m.id === 'O(1)'));
   // Log-log slope over the larger half of the range (startup costs dominate small n).
   let slope: number | null = null;
   const tail = pts.slice(Math.floor(pts.length / 2));
@@ -110,9 +115,9 @@ export function estimateComplexity(points: ComplexityPoint[], expected: string):
   let estimate: string;
   let confidence: number;
   if (spread < 8) {
-    // Everything ran in a few ms: the program is effectively constant/startup-dominated at these sizes.
-    estimate = 'O(1)';
-    confidence = 0.5;
+    // Everything ran in a few ms: start-up dominates at these sizes.
+    estimate = opts.linearInput ? 'O(n)' : 'O(1)';
+    confidence = opts.linearInput ? 0.3 : 0.5;
   } else {
     // The measured growth rate rules out models whose exponent is far from it
     // (least squares alone cannot tell √n from n on a short, noisy range).

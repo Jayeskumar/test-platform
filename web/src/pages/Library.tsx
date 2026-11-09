@@ -2,7 +2,7 @@ import { Code2, Database, ListChecks, Plus, Search } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Page, PageHeader } from '../components/Layout';
-import { Badge, Button, Difficulty, ErrorBox, Input, PageLoader, Select } from '../components/ui';
+import { Badge, Button, Difficulty, ErrorBox, Input, ListSkeleton, Select } from '../components/ui';
 import { api } from '../lib/api';
 import { ago } from '../lib/format';
 
@@ -25,7 +25,7 @@ export function Library() {
         <Select value={type} onChange={(e) => setType(e.target.value)} className="w-auto" aria-label="Type"><option value="">All types</option><option value="coding">Coding</option><option value="sql">SQL</option><option value="mcq">MCQ</option></Select>
       </div>
       <ErrorBox error={err} />
-      {!rows ? <PageLoader /> : (
+      {!rows ? <ListSkeleton rows={8} /> : (
         <div className="overflow-hidden rounded-xl border border-ink-800">
           <table className="w-full text-sm">
             <thead className="bg-ink-900 text-left text-xs text-ink-400"><tr><th className="px-4 py-2.5 font-medium">Question</th><th className="px-2 py-2.5 font-medium">Difficulty</th><th className="hidden px-2 py-2.5 font-medium md:table-cell">Tests</th><th className="hidden px-2 py-2.5 font-medium md:table-cell">Used in</th><th className="px-2 py-2.5 font-medium">Visibility</th><th className="hidden px-4 py-2.5 text-right font-medium sm:table-cell">Updated</th></tr></thead>

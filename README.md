@@ -20,14 +20,16 @@
 | **Fair integrity scoring** | Tab switches, fullscreen exits and large pastes feed an integrity score. When two candidates match, authorship evidence (paste or burst versus steady typing) decides who is penalized. |
 | **AI review** *(optional)* | With `ANTHROPIC_API_KEY` set, Claude writes a structured review per attempt: correctness, efficiency, code quality, strengths, concerns and follow-up interview questions. |
 | **Practice mode** | Problem list with filters, submission history, points, global rank, streaks, an activity heatmap and a skill radar. |
+| **Reviewer workflow** | A "needs your review" queue, candidate search, filters and sorting, side-by-side comparison of up to 4 candidates, Advance / Hold / Reject decisions with notes, CSV export, and print-ready reports (save as PDF). |
+| **Polished UI** | Light, dark and system themes with an editor that matches; a Ctrl/⌘+K command palette; an IDE with test-case and result tabs, adjustable font size, focus mode and remembered layout; mobile navigation; toasts and skeleton loaders. |
 
 See [`docs/PRODUCT.md`](docs/PRODUCT.md) for the product brief and roadmap.
 
-| Candidate report: integrity timeline and evidence | Code playback with complexity measurement |
+| Hiring dashboard | Side-by-side comparison |
 |---|---|
-| ![Candidate report](docs/screenshots/candidate-report.png) | ![Code playback](docs/screenshots/code-playback.png) |
-| **IDE with live judging** | **Assessment results** |
-| ![IDE](docs/screenshots/ide-live-judging.png) | ![Assessment results](docs/screenshots/assessment-results.png) |
+| ![Hiring dashboard](docs/screenshots/hiring-dashboard.png) | ![Compare candidates](docs/screenshots/compare.png) |
+| **Candidate report with decision** | **IDE (light theme)** |
+| ![Candidate report](docs/screenshots/candidate-report.png) | ![IDE](docs/screenshots/ide-live-judging.png) |
 
 ---
 
@@ -157,7 +159,7 @@ Everything is configured per assessment, and the candidate's intro page lists ex
 ## Testing
 
 ```bash
-npm test            # 77 tests, about 2.5 minutes
+npm test            # 79 tests, about 2.5 minutes
 npm run typecheck
 ```
 

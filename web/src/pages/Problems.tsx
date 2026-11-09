@@ -2,7 +2,7 @@ import { CheckCircle2, Circle, CircleDot, Code2, Database, ListChecks, Search } 
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Page, PageHeader } from '../components/Layout';
-import { Badge, Difficulty, ErrorBox, Input, PageLoader, Select } from '../components/ui';
+import { Badge, Difficulty, ErrorBox, Input, ListSkeleton, Select } from '../components/ui';
 import { api } from '../lib/api';
 import { cx } from '../lib/format';
 import type { Difficulty as D } from '../lib/types';
@@ -36,7 +36,7 @@ export function Problems() {
         <Select value={tag} onChange={(e) => setTag(e.target.value)} className="w-auto" aria-label="Topic"><option value="">All topics</option>{tags.map((t) => <option key={t}>{t}</option>)}</Select>
       </div>
       <ErrorBox error={err} />
-      {!rows && !err ? <PageLoader /> : (
+      {!rows && !err ? <ListSkeleton rows={10} /> : (
         <div className="overflow-hidden rounded-xl border border-ink-800">
           <table className="w-full text-sm">
             <thead className="bg-ink-900 text-left text-xs text-ink-400">

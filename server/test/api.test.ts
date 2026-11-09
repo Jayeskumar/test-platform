@@ -202,3 +202,47 @@ describe('HTTP API', () => {
     assert.equal(m.status, 400);
   });
 });
+
+describe('reviewer workflow', () => {
+  before(async () => {
+    await freshEnv();
+    app = await buildApp();
+  });
+  after(async () => { await app.close(); });
+
+  test('decisions, overview and comparison', async () => {
+    await req('POST', '/api/auth/register', { email: 'r@w.dev', name: 'Reviewer', password: 'password1', role: 'recruiter' }, 'rw');
+    await req('POST', '/api/auth/register', { email: 'o@w.dev', name: 'Other', password: 'password1', role: 'recruiter' }, 'ow');
+    const q = await createQuestion(MCQ_Q, null);
+    const a = (await req('POST', '/api/assessments', { title: 'Flow', durationMin: 10, questions: [{ questionId: q, points: 10 }] }, 'rw')).body.id;
+    const invs = (await req('POST', `/api/assessments/${a}/invites`, { candidates: [{ email: 'x@w.dev' }, { email: 'y@w.dev' }] }, 'rw')).body.invites;
+    for (const [i, inv] of invs.entries()) {
+      await req('POST', `/api/take/${inv.token}/start`, { name: `C${i}` });
+      await req('PUT', `/api/take/${inv.token}/answers/${q}`, { choice: i === 0 ? 'b' : 'a' });
+      await req('POST', `/api/take/${inv.token}/submit`);
+    }
+    let ov = await req('GET', '/api/hiring/overview', undefined, 'rw');
+    assert.equal(ov.body.stats.awaitingReview, 2);
+    assert.equal(ov.body.awaitingReview.length, 2);
+    assert.equal((await req('GET', '/api/hiring/overview', undefined, 'ow')).body.stats.awaitingReview, 0, 'scoped to owner');
+
+    assert.equal((await req('PUT', `/api/attempts/${invs[0].id}/review`, { decision: 'advance', notes: 'Strong.' }, 'ow')).status, 404);
+    assert.equal((await req('PUT', `/api/attempts/${invs[0].id}/review`, { decision: 'maybe' }, 'rw')).status, 400);
+    const r = await req('PUT', `/api/attempts/${invs[0].id}/review`, { decision: 'advance', notes: 'Strong.' }, 'rw');
+    assert.equal(r.status, 200);
+    ov = await req('GET', '/api/hiring/overview', undefined, 'rw');
+    assert.equal(ov.body.stats.awaitingReview, 1);
+
+    const detail = await req('GET', `/api/assessments/${a}`, undefined, 'rw');
+    const first = detail.body.attempts.find((x: any) => x.id === invs[0].id);
+    assert.equal(first.decision, 'advance');
+    assert.equal(first.decidedBy, 'Reviewer');
+    assert.equal(first.scores[q], 10);
+
+    const cmp = await req('GET', `/api/assessments/${a}/compare?ids=${invs[0].id},${invs[1].id}`, undefined, 'rw');
+    assert.equal(cmp.body.candidates.length, 2);
+    assert.equal(cmp.body.candidates[0].questions[0].score, 10);
+    assert.equal(cmp.body.candidates[1].questions[0].score, 0);
+    assert.equal((await req('GET', `/api/assessments/${a}/compare?ids=${invs[0].id}`, undefined, 'ow')).status, 404);
+  });
+});

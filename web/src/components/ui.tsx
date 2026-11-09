@@ -5,11 +5,11 @@ import type { Difficulty, Verdict } from '../lib/types';
 
 type Variant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'success';
 const VARIANTS: Record<Variant, string> = {
-  primary: 'bg-ember-500 text-ink-950 hover:bg-ember-400 font-semibold shadow-[0_0_0_1px_rgba(249,115,22,.4),0_8px_24px_-12px_rgba(249,115,22,.6)]',
+  primary: 'bg-ember-500 text-on-accent hover:bg-ember-400 font-semibold shadow-[0_0_0_1px_rgba(249,115,22,.4),0_8px_24px_-12px_rgba(249,115,22,.6)]',
   secondary: 'bg-ink-800 text-ink-100 hover:bg-ink-700 border border-ink-700',
   ghost: 'text-ink-300 hover:text-ink-100 hover:bg-ink-800',
   danger: 'bg-rose-600/90 text-white hover:bg-rose-500',
-  success: 'bg-emerald-500 text-ink-950 hover:bg-emerald-400 font-semibold',
+  success: 'bg-emerald-500 text-on-accent hover:bg-emerald-400 font-semibold',
 };
 
 export function Button({ variant = 'secondary', size = 'md', loading, className, children, ...rest }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: Variant; size?: 'sm' | 'md' | 'lg'; loading?: boolean }) {
@@ -26,8 +26,8 @@ export function Button({ variant = 'secondary', size = 'md', loading, className,
   );
 }
 
-export function Card({ className, children }: { className?: string; children: ReactNode }) {
-  return <div className={cx('rounded-xl border border-ink-700/70 bg-ink-900/80', className)}>{children}</div>;
+export function Card({ className, children, id }: { className?: string; children: ReactNode; id?: string }) {
+  return <div id={id} className={cx('print-break rounded-xl border border-ink-700/70 bg-ink-900/80 shadow-[0_1px_2px_rgba(0,0,0,.04)]', className)}>{children}</div>;
 }
 
 export function Badge({ className, children }: { className?: string; children: ReactNode }) {
@@ -46,6 +46,26 @@ export function Difficulty({ d }: { d: Difficulty }) {
 
 export function Spinner({ className }: { className?: string }) {
   return <Loader2 className={cx('size-5 animate-spin text-ink-400', className)} />;
+}
+
+export function Skeleton({ className }: { className?: string }) {
+  return <div className={cx('skeleton', className)} aria-hidden="true" />;
+}
+
+/** Placeholder rows while a list loads. */
+export function ListSkeleton({ rows = 6, className }: { rows?: number; className?: string }) {
+  return (
+    <div className={cx('overflow-hidden rounded-xl border border-ink-800', className)} role="status" aria-label="Loading">
+      {Array.from({ length: rows }, (_, i) => (
+        <div key={i} className="flex items-center gap-4 border-t border-ink-800 px-4 py-3.5 first:border-t-0">
+          <Skeleton className="size-4 rounded-full" />
+          <Skeleton className="h-3.5 flex-1" />
+          <Skeleton className="hidden h-3.5 w-24 sm:block" />
+          <Skeleton className="h-3.5 w-14" />
+        </div>
+      ))}
+    </div>
+  );
 }
 
 export function PageLoader() {

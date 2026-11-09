@@ -29,7 +29,7 @@ export function Dashboard() {
   return (
     <Page>
       <PageHeader title={`Hi, ${user?.name.split(' ')[0]}`} subtitle="Your practice progress" />
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat label="Points" value={s.points} sub="easy 10 · medium 25 · hard 50" />
         <Stat label="Global rank" value={<span className="flex items-center gap-2"><Trophy className="size-5 text-amber-300" />#{s.rank}</span>} sub={`of ${s.ranked} ranked`} />
         <Stat label="Solved" value={s.solved.length} sub={['easy', 'medium', 'hard'].map((d) => `${by(d)}/${s.totals[d] ?? 0} ${d}`).join(' · ')} />
